@@ -1,0 +1,37 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>🕵️ Obfuscated Spoof Script Loader</title>
+  <style>
+    body { background: #0d1117; color: #c9d1d9; font-family: monospace; padding: 2rem; }
+    select, button { background: #161b22; color: #c9d1d9; border: 1px solid #30363d; padding: 0.5rem; }
+    pre { background: #161b22; padding: 1rem; border-radius: 5px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h2>🔐 Select & Decode Spoof Script</h2>
+  <select id="scriptPicker">
+    <option value="stripe-radar-evasion.js.b64">Stripe Radar</option>
+    <option value="otp-autofill.js.b64">OTP Autofill</option>
+    <option value="location-fencer.js.b64">Location Fencer</option>
+    <option value="claude-spoof.js.b64">Claude AI</option>
+    <option value="coinbase-spoof.js.b64">Coinbase</option>
+    <option value="wise-spoof.js.b64">Wise</option>
+    <option value="metamask-spoof.js.b64">MetaMask</option>
+  </select>
+  <button onclick="loadScript()">🔍 Decode</button>
+  <pre id="output"></pre>
+
+  <script>
+    async function loadScript() {
+      const file = document.getElementById('scriptPicker').value;
+      const response = await fetch(file);
+      const base64 = await response.text();
+      const decoded = atob(base64);
+      document.getElementById('output').innerText = decoded;
+    }
+  </script>
+</body>
+</html>
