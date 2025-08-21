@@ -1,4 +1,4 @@
-:cpu_quota::cpname: 🔁 Auto-Refresh + Obfuscate Scripts
+# 🔁 Auto-Refresh + Obfuscate Scripts
 
 on:
   schedule:
@@ -29,10 +29,15 @@ jobs:
 
       - name: 🔐 Obfuscate All Spoof Logic
         run: |
+          npm install --save-dev javascript-obfuscator
           mkdir -p obfuscated
-          find scripts auth finance network social location device -type f -name "*.js" | while read file; do
-            outname=$(echo "$file" | sed 's|/|-|g')
-            base64 "$file" > "obfuscated/${outname}.b64"
+          for dir in scripts auth finance network social location device; do
+            if [ -d "$dir" ]; then
+              find "$dir" -type f -name "*.js" | while read file; do
+                outname=$(echo "$file" | sed 's|/|-|g')
+                npx javascript-obfuscator "$file" --output "obfuscated/${outname}.js"
+              done
+            fi
           done
 
       - name: 📤 Commit & Push Changes
@@ -40,5 +45,8 @@ jobs:
           git config user.name "popdeuxrem"
           git config user.email "174709939+popdeuxrem@users.noreply.github.com"
           git add scripts/ auth/ finance/ network/ location/ device/ social/ obfuscated/
-          git commit -m "🔄 Auto-refresh spoof & obfuscated scripts [skip ci]" || echo "No changes"
-          git push
+          if ! git diff --cached --quiet; then
+            git commit -m "🔄 Auto-refresh spoof & obfuscated scripts [skip ci]"
+            git push
+          else
+            echo "No changes to commit"
