@@ -1,0 +1,44 @@
+:cpu_quota::cpname: 🔁 Auto-Refresh + Obfuscate Scripts
+
+on:
+  schedule:
+    - cron: "0 */6 * * *" # Every 6 hours
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: 🛠 Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: 📦 Install Dependencies
+        run: npm install
+
+      - name: 🔄 Run Rotating Spoof Scripts
+        run: |
+          node scripts/rotate-cookies.js
+          node scripts/rotate-headers.js
+          node scripts/rotate-tokens.js
+
+      - name: 🔐 Obfuscate All Spoof Logic
+        run: |
+          mkdir -p obfuscated
+          find scripts auth finance network social location device -type f -name "*.js" | while read file; do
+            outname=$(echo "$file" | sed 's|/|-|g')
+            base64 "$file" > "obfuscated/${outname}.b64"
+          done
+
+      - name: 📤 Commit & Push Changes
+        run: |
+          git config user.name "popdeuxrem"
+          git config user.email "174709939+popdeuxrem@users.noreply.github.com"
+          git add scripts/ auth/ finance/ network/ location/ device/ social/ obfuscated/
+          git commit -m "🔄 Auto-refresh spoof & obfuscated scripts [skip ci]" || echo "No changes"
+          git push
