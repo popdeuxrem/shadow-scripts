@@ -57,14 +57,13 @@ jobs:
             fi
           done
 
-      # Optional: Base64 encode (uncomment to activate)
-       - name: 🔏 Base64 Encode Obfuscated Scripts
-         run: |
-           mkdir -p obfuscated/b64
-           for js in obfuscated/*.js; do
-             base=$(basename "$js" .js)
-             base64 "$js" > "obfuscated/b64/${base}.js.b64"
-           done
+      - name: 🔏 Base64 Encode Obfuscated Scripts
+        run: |
+          mkdir -p obfuscated/b64
+          for js in obfuscated/*.js; do
+            base=$(basename "$js" .js)
+            base64 "$js" > "obfuscated/b64/${base}.js.b64"
+          done
 
       - name: 📤 Commit & Push Changes
         run: |
