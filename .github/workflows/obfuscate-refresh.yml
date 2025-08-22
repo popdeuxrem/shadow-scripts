@@ -18,8 +18,25 @@ jobs:
         with:
           node-version: 18
 
+      - name: 📦 Cache npm dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: 🧾 Verify package.json exists
+        run: |
+          if [ ! -f package.json ]; then
+            echo "❌ package.json not found in repository root! Aborting."
+            exit 1
+          fi
+        working-directory: ./
+
       - name: 📦 Install Dependencies
         run: npm install
+        working-directory: ./
 
       - name: 🔄 Run Spoof Rotators
         run: |
@@ -41,13 +58,13 @@ jobs:
           done
 
       # Optional: Base64 encode (uncomment to activate)
-      # - name: 🔏 Base64 Encode Obfuscated Scripts
-      #   run: |
-      #     mkdir -p obfuscated/b64
-      #     for js in obfuscated/*.js; do
-      #       base=$(basename "$js" .js)
-      #       base64 "$js" > "obfuscated/b64/${base}.js.b64"
-      #     done
+       - name: 🔏 Base64 Encode Obfuscated Scripts
+         run: |
+           mkdir -p obfuscated/b64
+           for js in obfuscated/*.js; do
+             base=$(basename "$js" .js)
+             base64 "$js" > "obfuscated/b64/${base}.js.b64"
+           done
 
       - name: 📤 Commit & Push Changes
         run: |
