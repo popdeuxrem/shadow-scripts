@@ -1,0 +1,11 @@
+{
+  "name": "shadow-scripts",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "rotate": "node scripts/rotate-tokens.js && node scripts/rotate-cookies.js && node scripts/rotate-headers.js"
+  },
+  "devDependencies": {
+    "javascript-obfuscator": "^4.0.0"
+  }
+}
