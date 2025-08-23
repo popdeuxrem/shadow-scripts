@@ -1,26 +1,16 @@
 name: 🔁 Stealth Loader: Obfuscate, Generate, Deploy, Notify (Bash Only)
 
 on:
-  push:
-    paths:
-      - 'src-scripts/**/*.js'
-      - 'scripts/index-template.html'
-      - 'scripts/catalog-template.html'
-      - 'scripts/gen-configs.sh'
-      - '.github/workflows/update-index.yml'
   schedule:
     - cron: "0 */6 * * *"
   workflow_dispatch:
-
-env:
-  DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
 
 jobs:
   update:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout
+      - name: 📥 Checkout Repository
         uses: actions/checkout@v4
 
       - name: 📦 Install global tooling
