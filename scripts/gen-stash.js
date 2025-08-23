@@ -1,52 +1,60 @@
-#!/usr/bin/env node
-const fs = require("fs");
-const path = require("path");
-const yaml = require("js-yaml");
+// scripts/gen-stash.js
+const fs = require('fs');
+const path = require('path');
+const yaml = require('js-yaml');
 
-function readYaml(filepath) {
-  return yaml.load(fs.readFileSync(filepath, "utf8"));
-}
+const OUTPUT = path.resolve(__dirname, '../apps/loader/public/configs/stash.conf');
+const RULES_FILE = path.resolve(__dirname, '../configs/master-rules.yaml');
+const DNS_SERVER = process.env.DNS_SERVER || '1.1.1.1';
 
-function extractProxies(rules) {
-  if (!rules.proxies) return [];
-  if (Array.isArray(rules.proxies)) return rules.proxies;
-  return Object.values(rules.proxies).flat();
-}
-
-function renderStash(rules) {
-  let out = "proxies:\n";
-  for (const p of extractProxies(rules)) {
-    out += `  - name: ${p.name}\n    type: ${p.type}\n    server: ${p.host}\n    port: ${p.port}\n`;
-    if (p.user) out += `    username: ${p.user}\n`;
-    if (p.pass) out += `    password: ${p.pass}\n`;
-    if (p.uuid) out += `    uuid: ${p.uuid}\n`;
-    if (p.tls) out += `    tls: ${p.tls}\n`;
-    if (p.ws) out += `    ws: ${p.ws}\n`;
-    if (p.ws_path || p.wsPath) out += `    ws-path: ${p.ws_path || p.wsPath}\n`;
+function parseRules() {
+  if (!fs.existsSync(RULES_FILE)) {
+    throw new Error(`Rules file not found: ${RULES_FILE}`);
   }
-  if (rules.groups) {
-    out += "proxy-groups:\n";
-    for (const [name, proxies] of Object.entries(rules.groups)) {
-      out += `  - name: ${name}\n    type: select\n    proxies:\n`;
-      for (const p of proxies) out += `      - ${p}\n`;
+  return yaml.load(fs.readFileSync(RULES_FILE, 'utf8'));
+}
+
+function renderStash(rules, dns) {
+  let out = [];
+
+  out.push(`[General]`);
+  out.push(`dns-server = ${dns}`);
+
+  // Proxies
+  if (rules?.proxies && Array.isArray(rules.proxies)) {
+    out.push(`\n[Proxy]`);
+    for (const p of rules.proxies) {
+      out.push(`${p.name} = ${p.type},${p.server},${p.port}${p.username ? ',' + p.username : ''}${p.password ? ',' + p.password : ''}`);
     }
   }
-  if (rules.rules) {
-    out += "rules:\n";
+
+  // Proxy Groups
+  if (rules?.proxy_groups && Array.isArray(rules.proxy_groups)) {
+    out.push(`\n[Proxy Group]`);
+    for (const g of rules.proxy_groups) {
+      out.push(`${g.name} = ${g.type}, ${g.proxies?.join(', ')}`);
+    }
+  }
+
+  // Rules
+  if (rules?.rules && Array.isArray(rules.rules)) {
+    out.push(`\n[Rule]`);
     for (const r of rules.rules) {
-      if (r.type && r.value && r.group) out += `  - ${r.type},${r.value},${r.group}\n`;
+      out.push(r);
     }
   }
-  return out;
+
+  return out.join('\n') + '\n';
 }
 
 function main() {
-  const inFile = process.argv[2] || path.resolve(__dirname, "../configs/master-rules.yaml");
-  const outFile = "stash.conf";
-  const rules = readYaml(inFile);
-  const outdir = path.resolve(__dirname, "../apps/loader/public/configs");
-  fs.mkdirSync(outdir, { recursive: true });
-  fs.writeFileSync(path.join(outdir, outFile), renderStash(rules));
-  console.log(`Wrote: ${outFile}`);
+  const rules = parseRules();
+  const conf = renderStash(rules, DNS_SERVER);
+  fs.mkdirSync(path.dirname(OUTPUT), { recursive: true });
+  fs.writeFileSync(OUTPUT, conf);
+  console.log(`Wrote: ${OUTPUT}`);
 }
-main();
+
+if (require.main === module) {
+  main();
+}

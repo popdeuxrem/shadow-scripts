@@ -9,6 +9,7 @@
     "@types/js-yaml": "^4.0.9",
     "javascript-obfuscator": "^4.1.1",
     "js-yaml": "^4.1.0",
+    "plist": "^3.1.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2",
     "uuid": "^11.1.0"
