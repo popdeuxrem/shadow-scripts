@@ -21,73 +21,41 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: 🛠 Setup Node
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 18
+          cache: 'pnpm'
 
-      - name: 📦 Install global tooling
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq
-          npm install -g javascript-obfuscator
-
-      - name: 🔐 Obfuscate and Base64-encode all spoof scripts (recursive, monorepo)
-        run: |
-          OUTDIR="apps/loader/public/obfuscated"
-          SRCDIRS="src-scripts scripts/auth scripts/device scripts/finance scripts/location scripts/network scripts/security scripts/social"
-          mkdir -p "$OUTDIR"
-          find $SRCDIRS -type f -name "*.js" | while read f; do
-            base=$(echo "$f" | sed 's|/|-|g' | sed 's|\.js$||')
-            javascript-obfuscator "$f" --output "$OUTDIR/${base}.ob.js" --compact true --self-defending true --control-flow-flattening true
-            base64 "$OUTDIR/${base}.ob.js" > "$OUTDIR/${base}.js.b64"
-          done
-
-      - name: 🔁 Generate loader, manifest, catalog from templates
-        run: |
-          mkdir -p apps/loader/public/obfuscated
-          mkdir -p apps/loader/public
-
-          cd apps/loader/public/obfuscated
-          files=$(find . -name "*.js.b64" | sed 's|^\./||g' | jq -R . | jq -s .)
-          files_raw=$(find . -name "*.js.b64" | sort | sed 's|^\./||g')
-          cd ../..
-
-          # Loader index.html
-          sed "s|__SPOOF_TARGETS__|$files|" scripts/index-template.html > apps/loader/public/index.html
-
-          # manifest.json
-          echo "$files" > apps/loader/public/manifest.json
-
-          # catalog.html
-          list_html=""
-          for file in $files_raw; do
-            list_html="$list_html<li><span class=\"url\">$file</span></li>"
-          done
-          sed "s|__CATALOG_LIST__|$list_html|" scripts/catalog-template.html > apps/loader/public/catalog.html
-
-      - name: 📤 Commit & Push if changed
-        run: |
-          git config user.name "popdeuxrem"
-          git config user.email "174709939+popdeuxrem@users.noreply.github.com"
-          git add apps/loader/public/obfuscated/ apps/loader/public/index.html apps/loader/public/manifest.json apps/loader/public/catalog.html
-          git diff --cached --quiet || (git commit -m "🔁 Obfuscate, generate, deploy [skip ci]" && git push)
-
-      - name: 🚀 Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./apps/loader/public
-          publish_branch: gh-pages
+          version: 9.7.0
 
-      - name: 💬 Discord notification
-        if: env.DISCORD_WEBHOOK != ''
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build loader & configs
         run: |
-          commit_url="https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
-          num_scripts=$(ls apps/loader/public/obfuscated/*.js.b64 | wc -l)
-          curl -X POST -H "Content-Type: application/json" \
-            -d "{\"username\": \"ShadowScriptsBot\", \"content\": \"Deployed $num_scripts spoof scripts. [View Commit]($commit_url) | [Catalog](https://popdeuxrem.github.io/shadow-scripts/catalog.html)\"}" \
-            "$DISCORD_WEBHOOK"
+          chmod +x scripts/build-all.sh
+          ./scripts/build-all.sh
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "🔄 Auto-regenerate loader + configs"
+          git push
+        continue-on-error: true
+
+      - name: Send Discord webhook
+        if: always()
+        run: |
+          curl -H "Content-Type: application/json" \
+               -X POST \
+               -d '{"content": "✅ Build + loader update complete."}' \
+               "$DISCORD_WEBHOOK"
