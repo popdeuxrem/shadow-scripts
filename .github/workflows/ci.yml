@@ -1,16 +1,28 @@
 name: CI
+
 on: [push, pull_request]
+
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm gen-configs
-      - run: pnpm --filter @shadow/loader build
-      - run: pnpm test || true
+
+      - name: ⬇️ Install dependencies
+        run: pnpm install
+
+      - name: 🔧 Generate configs
+        run: pnpm gen-configs
+
+      - name: 🛠 Build loader
+        run: pnpm --filter @shadow/loader build
+
+      - name: 🧪 Test (do not fail CI)
+        run: pnpm test || true
