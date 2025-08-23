@@ -1,4 +1,4 @@
-name: 🔁 Auto-obfuscate, manifest, catalog, inject, deploy Loader
+name: 🔁 Full Stealth Loader: Obfuscate, Generate, Deploy, Notify
 
 on:
   push:
@@ -44,38 +44,36 @@ jobs:
             base64 "$OUTDIR/${base}.ob.js" > "$OUTDIR/${base}.js.b64"
           done
 
-      - name: 🔁 Generate index.html loader from template
+      - name: 🔁 Generate loader, manifest, catalog from templates
         run: |
           mkdir -p apps/loader/public/obfuscated
           mkdir -p apps/loader/public
-          OUTDIR="apps/loader/public/obfuscated"
-          LOADER="apps/loader/public/index.html"
-          cd "$OUTDIR"
-          files=$(find . -name "*.js.b64" | sed 's|^\./||g' | jq -R . | jq -s .)
-          cd ../..
-          sed "s|__SPOOF_TARGETS__|$files|" scripts/index-template.html > "$LOADER"
 
-      - name: 📝 Generate manifest.json and catalog.html
-        run: |
-          mkdir -p apps/loader/public/obfuscated
-          mkdir -p apps/loader/public
-          OUTDIR="apps/loader/public/obfuscated"
-          MANIFEST="apps/loader/public/manifest.json"
-          CATALOG="apps/loader/public/catalog.html"
-          cd "$OUTDIR"
-          # manifest.json (array)
-          find . -name "*.js.b64" | sed 's|^\./||g' | jq -R . | jq -s . > ../../manifest.json
-          # catalog.html
-          list=$(find . -name "*.js.b64" | sort | sed "s|^\./||g" | awk '{printf "<li><span class=\"url\">%s</span></li>", $1}')
+          # 1. Build the loader index.html
+          cd apps/loader/public/obfuscated
+          files=$(find . -name "*.js.b64" | sed 's|^\./||g' | jq -R . | jq -s .)
+          files_raw=$(find . -name "*.js.b64" | sort | sed 's|^\./||g')
           cd ../..
-          sed "s|__CATALOG_LIST__|$list|" scripts/catalog-template.html > "$CATALOG"
+
+          # 2. Loader index.html
+          sed "s|__SPOOF_TARGETS__|$files|" scripts/index-template.html > apps/loader/public/index.html
+
+          # 3. manifest.json
+          echo "$files" > apps/loader/public/manifest.json
+
+          # 4. catalog.html
+          list_html=""
+          for file in $files_raw; do
+            list_html="$list_html<li><span class=\"url\">$file</span></li>"
+          done
+          sed "s|__CATALOG_LIST__|$list_html|" scripts/catalog-template.html > apps/loader/public/catalog.html
 
       - name: 📤 Commit & Push if changed
         run: |
           git config user.name "popdeuxrem"
           git config user.email "174709939+popdeuxrem@users.noreply.github.com"
           git add apps/loader/public/obfuscated/ apps/loader/public/index.html apps/loader/public/manifest.json apps/loader/public/catalog.html
-          git diff --cached --quiet || (git commit -m "🔁 Auto-obfuscate, base64, inject, manifest, catalog, deploy [skip ci]" && git push)
+          git diff --cached --quiet || (git commit -m "🔁 Obfuscate, generate, deploy [skip ci]" && git push)
 
       - name: 🚀 Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
