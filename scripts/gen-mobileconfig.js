@@ -1,87 +1,73 @@
-#!/usr/bin/env node
-
+// scripts/gen-mobileconfig.js
 const fs = require("fs");
-const path = require("path");
-const yaml = require("js-yaml");
-const { v4: uuidv4 } = require("uuid"); // Need uuid: pnpm add -Dw uuid
+const { v4: uuidv4 } = require("uuid");
 
-function readYaml(filepath) {
-  return yaml.load(fs.readFileSync(filepath, "utf8"));
+const {
+  DNS_SERVER = "premiusa1.vpnjantit.com",          // Fallback to your host
+  DNS_PROTOCOL,                                    // 'https' (DoH), 'tls' (DoT), or empty
+  DOH_URL,                                         // Required if DNS_PROTOCOL is set
+  PROFILE_NAME = "Stealth DNS/Proxy",
+  OUTPUT = "apps/loader/public/configs/stealth-dns.mobileconfig",
+} = process.env;
+
+const payloadUUID = uuidv4().toUpperCase();
+
+const dnsSettings = {
+  ServerAddresses: [DNS_SERVER],
+  SupplementalMatchDomains: ["."],
+  MatchDomainsNoSearch: true,
+};
+
+if (DNS_PROTOCOL && DOH_URL) {
+  dnsSettings.DNSProtocol = DNS_PROTOCOL;
+  dnsSettings.ServerURL = DOH_URL;
 }
 
-// Determine DNS/Proxy endpoint from YAML
-function getDnsOrProxy(rules) {
-  // Priority: rules.dns, then rules.proxy, fallback to 1.1.1.1
-  if (rules.stealth_dns) return rules.stealth_dns;
-  if (rules.dns) return rules.dns;
-  // Optionally pull from your proxies list
-  if (rules.proxies) {
-    // Flat extract if nested
-    let proxies = Array.isArray(rules.proxies)
-      ? rules.proxies
-      : Object.values(rules.proxies).flat();
-    if (proxies.length && proxies[0].host) return proxies[0].host;
+const profile = {
+  PayloadContent: [
+    {
+      PayloadDescription: "Configures DNS for stealth proxy/DoH on iOS.",
+      PayloadDisplayName: PROFILE_NAME,
+      PayloadIdentifier: `com.shadow.${payloadUUID}`,
+      PayloadType: "com.apple.dnsSettings.managed",
+      PayloadUUID: payloadUUID,
+      PayloadVersion: 1,
+      DNSSettings: dnsSettings,
+    },
+  ],
+  PayloadDisplayName: PROFILE_NAME,
+  PayloadIdentifier: `com.shadow.${payloadUUID}`,
+  PayloadRemovalDisallowed: false,
+  PayloadType: "Configuration",
+  PayloadUUID: payloadUUID,
+  PayloadVersion: 1,
+};
+
+// Helper: write as Apple plist (minimal, manual XML)
+function toPlist(obj, indent = 0) {
+  const pad = (n) => "  ".repeat(n);
+  if (Array.isArray(obj)) {
+    return `<array>\n${obj.map(v => pad(indent + 1) + toPlist(v, indent + 1)).join('\n')}\n${pad(indent)}</array>`;
   }
-  return "1.1.1.1";
+  if (typeof obj === "object" && obj !== null) {
+    return `<dict>\n${Object.entries(obj)
+      .map(([k, v]) => `${pad(indent + 1)}<key>${k}</key>\n${pad(indent + 1)}${toPlist(v, indent + 1)}`)
+      .join('\n')}\n${pad(indent)}</dict>`;
+  }
+  if (typeof obj === "boolean") return `<${obj}/>`;
+  if (typeof obj === "number") return `<integer>${obj}</integer>`;
+  // Escape XML
+  return `<string>${String(obj).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</string>`;
 }
 
-function renderMobileconfig(dnsAddr, profileName = "Stealth DNS/Proxy") {
-  const uuid = uuidv4().toUpperCase();
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>PayloadContent</key>
-  <array>
-    <dict>
-      <key>PayloadDescription</key>
-      <string>Configures DNS for stealth proxy/DoH on iOS.</string>
-      <key>PayloadDisplayName</key>
-      <string>${profileName}</string>
-      <key>PayloadIdentifier</key>
-      <string>com.shadow.${uuid}</string>
-      <key>PayloadType</key>
-      <string>com.apple.dnsSettings.managed</string>
-      <key>PayloadUUID</key>
-      <string>${uuid}</string>
-      <key>PayloadVersion</key>
-      <integer>1</integer>
-      <key>DNSSettings</key>
-      <dict>
-        <key>ServerAddresses</key>
-        <array>
-          <string>${dnsAddr}</string>
-        </array>
-      </dict>
-    </dict>
-  </array>
-  <key>PayloadDisplayName</key>
-  <string>${profileName}</string>
-  <key>PayloadIdentifier</key>
-  <string>com.shadow.${uuid}</string>
-  <key>PayloadRemovalDisallowed</key>
-  <false/>
-  <key>PayloadType</key>
-  <string>Configuration</string>
-  <key>PayloadUUID</key>
-  <string>${uuid}</string>
-  <key>PayloadVersion</key>
-  <integer>1</integer>
-</dict>
-</plist>`;
-}
+const xml =
+  `<?xml version="1.0" encoding="UTF-8"?>\n` +
+  `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n` +
+  `<plist version="1.0">\n` +
+  toPlist(profile, 0) +
+  `\n</plist>\n`;
 
-// Entrypoint
-function main() {
-  const inFile = process.argv[2] || path.resolve(__dirname, "../configs/master-rules.yaml");
-  const outFile = "stealth-dns.mobileconfig";
-  const rules = readYaml(inFile);
-  const dns = getDnsOrProxy(rules);
-  const content = renderMobileconfig(dns);
-  const outdir = path.resolve(__dirname, "../apps/loader/public/configs");
-  fs.mkdirSync(outdir, { recursive: true });
-  fs.writeFileSync(path.join(outdir, outFile), content);
-  console.log(`Wrote: ${outFile} (for DNS: ${dns})`);
-}
+fs.mkdirSync(require("path").dirname(OUTPUT), { recursive: true });
+fs.writeFileSync(OUTPUT, xml);
 
-main();
+console.log(`✅ Generated: ${OUTPUT}\n`);
