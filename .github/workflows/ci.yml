@@ -26,10 +26,13 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment:
       name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     outputs:
       sha_short: ${{ steps.sha.outputs.sha_short }}
+      build_version: ${{ env.BUILD_VERSION }}
 
     steps:
       - name: "📥 Checkout"
@@ -47,56 +50,68 @@ jobs:
           version: 9.7.0
 
       - name: "🛠️ Setup Node.js"
+        id: setup-node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
 
       - name: "📦 Install Dependencies"
-        run: pnpm install --frozen-lockfile
+        id: deps
+        run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: "🔍 Audit dependencies"
-        run: pnpm audit --audit-level=high || echo "Security vulnerabilities found"
+        id: audit
+        run: pnpm audit --audit-level=high || echo "::warning::Security vulnerabilities found"
 
       - name: "📝 Set build version"
+        id: version
         run: echo "BUILD_VERSION=$(date +'%Y%m%d').${{ steps.sha.outputs.sha_short }}" >> $GITHUB_ENV
 
       - name: "🔨 Build all"
+        id: build
         run: |
           chmod +x scripts/build-all.sh
           ./scripts/build-all.sh
 
       - name: "🗂 Copy manifest loader as index.html"
+        id: copy-manifest
         run: |
           cp scripts/manifest-loader.html apps/loader/public/index.html
 
       - name: "🧪 Validate build artifacts"
+        id: validate
         run: |
           if [ ! -d "./apps/loader/public" ]; then
-            echo "Build failed - public directory missing"
+            echo "::error::Build failed - public directory missing"
             exit 1
           fi
-          find ./apps/loader/public -type f -name "*.js" -o -name "*.json" | xargs -I{} sh -c '
-            if [ ! -s "{}" ]; then
-              echo "Empty file detected: {}"
-              exit 1
-            fi
-          '
+          
+          empty_files=$(find ./apps/loader/public -type f \( -name "*.js" -o -name "*.json" \) -size 0)
+          if [ ! -z "$empty_files" ]; then
+            echo "::error::Empty files detected: $empty_files"
+            exit 1
+          fi
 
       - name: "📝 Commit & Push if changed"
+        id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --cached --quiet || (git commit -m "🤖 Auto-update configs/artifacts [skip ci]" -m "Build: ${{ steps.sha.outputs.sha_short }}" && git push)
+          git diff --cached --quiet || (git commit -m "🤖 Auto-update configs/artifacts [skip ci]" -m "Build: ${{ env.BUILD_VERSION }}" && git push)
 
       - name: "📄 Setup Pages"
+        id: pages
         uses: actions/configure-pages@v4
 
       - name: "📦 Upload Pages Artifact"
+        id: upload
         uses: actions/upload-pages-artifact@v3
         with:
           path: "./apps/loader/public"
+          retention-days: 30
 
       - name: "🚀 Deploy to GitHub Pages"
+        id: deployment
         uses: actions/deploy-pages@v4
