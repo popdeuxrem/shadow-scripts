@@ -46,6 +46,7 @@ jobs:
 
       - name: 🔁 Generate index.html loader from template
         run: |
+          mkdir -p apps/loader/public
           OUTDIR="apps/loader/public/obfuscated"
           LOADER="apps/loader/public/index.html"
           cd "$OUTDIR"
@@ -55,6 +56,7 @@ jobs:
 
       - name: 📝 Generate manifest.json and catalog.html
         run: |
+          mkdir -p apps/loader/public
           OUTDIR="apps/loader/public/obfuscated"
           MANIFEST="apps/loader/public/manifest.json"
           CATALOG="apps/loader/public/catalog.html"
