@@ -1,73 +1,109 @@
-name: '🔁 Full Stealth Loader: Obfuscate, Generate, Deploy, Notify'
+name: '🔁 Full Stealth Loader: Obfuscate ➜ Generate ➜ Deploy ➜ Notify'
 
 on:
   push:
     paths:
       - 'src-scripts/**/*.js'
-      - 'scripts/**/*.js'
-      - 'scripts/**/*.ts'
-      - 'scripts/**/*.sh'
+      - 'scripts/**/*.{js,ts,sh}'
       - 'configs/master-rules.yaml'
       - '.github/workflows/update-index.yml'
       - 'package.json'
       - 'pnpm-lock.yaml'
   schedule:
-    - cron: "0 */6 * * *"
+    - cron: '0 */6 * * *'   # every 6 h
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
+  pages:    write
+  id-token: write
 
 env:
+  DNS_SERVER: "1.1.1.1"                 # fallback for mobileconfig
   DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
 
+###############################################################################
+# 1️⃣ BUILD job – generate configs, obfuscate scripts, copy manifest loader   #
+###############################################################################
 jobs:
-  update:
+  build:
     runs-on: ubuntu-latest
-
+    outputs:
+      sha: ${{ steps.sha.outputs.short }}
     steps:
-      - name: 📥 Checkout repo
+      - name: ⬇️ Checkout
         uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
 
-      - name: 🏗 Setup pnpm
+      - name: 🔑 Short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: 🏗 Set up pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 9.7.0
+        with: { version: 9.7.0 }
 
-      - name: 🛠️ Setup Node.js
+      - name: 🛠 Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
 
-      - name: 📦 Install dependencies
+      - name: 📦 Install deps
         run: pnpm install --frozen-lockfile
 
-      - name: 🔨 Build everything (loader, obfuscation, configs, catalog)
+      - name: 🔨 Build (configs · obfuscation · manifest · catalog)
         run: |
           chmod +x scripts/build-all.sh
           ./scripts/build-all.sh
+          # copy manifest-based loader as the public index
+          cp scripts/manifest-loader.html apps/loader/public/index.html
 
-      - name: 📝 Commit & Push if changed
+      - name: 🧪 Validate outputs
         run: |
-          git config user.name "github-actions[bot]"
+          [ -d apps/loader/public ] || { echo "❌ public dir missing"; exit 1; }
+          find apps/loader/public -type f \( -name '*.js' -o -name '*.json' \) \
+            | while read -r f; do [ -s "$f" ] || { echo "❌ empty file: $f"; exit 1; }; done
+
+      - name: 📝 Auto-commit (with rebase)
+        run: |
+          git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
           git add .
-          git diff --cached --quiet || git commit -m "🤖 Auto-update loader/configs [skip ci]"
-          git push
+          git diff --cached --quiet || {
+            git commit -m "🤖 Auto-build artifacts [skip ci]" -m "Build: ${{ steps.sha.outputs.short }}"
+            git pull --rebase origin main || true
+            git push origin main || true
+          }
 
+      - name: 📦 Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with: { path: apps/loader/public }
+
+###############################################################################
+# 2️⃣ DEPLOY job – publishes artifact to GitHub Pages                         #
+###############################################################################
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url:  ${{ steps.deploy.outputs.page_url }}
+    steps:
       - name: 🚀 Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./apps/loader/public
-          publish_branch: gh-pages
+        id: deploy
+        uses: actions/deploy-pages@v4
 
+###############################################################################
+# 3️⃣ NOTIFY (Discord) – optional                                             #
+###############################################################################
       - name: 💬 Discord notification
-        if: always()
+        if: success() && env.DISCORD_WEBHOOK != ''
         run: |
-          curl -H "Content-Type: application/json" \
-               -X POST \
-               -d "{\"content\": \"✅ Loader and configs auto-updated and deployed to GitHub Pages.\"}" \
-               "$DISCORD_WEBHOOK"
+          curl -H "Content-Type: application/json" -X POST \
+               -d "{\"content\":\"✅ Stealth Loader build ${{ needs.build.outputs.sha }} deployed → ${{ steps.deploy.outputs.page_url }}\"}" \
+               "$DISCORD_WEBHOOK" || true
