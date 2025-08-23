@@ -1,5 +1,3 @@
-name: 🔁 Full Stealth Loader: Obfuscate, Generate, Deploy, Notify
-
 on:
   push:
     paths:
@@ -13,6 +11,8 @@ on:
     - cron: "0 */6 * * *"
   workflow_dispatch:
 
+name: 🔁 Full Stealth Loader: Obfuscate, Generate, Deploy, Notify
+
 env:
   DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
 
@@ -21,25 +21,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout repository
+      - name: 📥 Checkout
         uses: actions/checkout@v4
 
-      # Optional: Clean up previous obfuscated files for build hygiene
-      - name: 🧹 Clean old obfuscated output
-        run: rm -rf apps/loader/public/obfuscated/*
+      - name: 🛠 Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
 
-      # Tooling for everything (no pnpm required unless you use it elsewhere)
       - name: 📦 Install global tooling
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
-          npm install -g typescript ts-node javascript-obfuscator eslint
+          npm install -g javascript-obfuscator
 
-      # (Optional) Lint all JS/TS for errors before obfuscation
-      - name: 🔎 Lint scripts
-        run: npx eslint src-scripts/ scripts/ || true
-
-      - name: 🔐 Obfuscate & base64 encode all spoof scripts
+      - name: 🔐 Obfuscate and Base64-encode all spoof scripts (recursive, monorepo)
         run: |
           OUTDIR="apps/loader/public/obfuscated"
           SRCDIRS="src-scripts scripts/auth scripts/device scripts/finance scripts/location scripts/network scripts/security scripts/social"
@@ -50,19 +46,34 @@ jobs:
             base64 "$OUTDIR/${base}.ob.js" > "$OUTDIR/${base}.js.b64"
           done
 
-      - name: 🧠 Generate loader, manifest, catalog using gen-configs.ts
-        run: npx ts-node scripts/gen-configs.ts
+      - name: 🔁 Generate loader, manifest, catalog from templates
+        run: |
+          mkdir -p apps/loader/public/obfuscated
+          mkdir -p apps/loader/public
 
-      # (Optional) Run tests (if any). Set up a test folder and scripts if you want real testing.
-      - name: 🧪 Run tests (optional)
-        run: pnpm test || true
-        continue-on-error: true
+          cd apps/loader/public/obfuscated
+          files=$(find . -name "*.js.b64" | sed 's|^\./||g' | jq -R . | jq -s .)
+          files_raw=$(find . -name "*.js.b64" | sort | sed 's|^\./||g')
+          cd ../..
 
-      - name: 📤 Commit & push changes (if any)
+          # Loader index.html
+          sed "s|__SPOOF_TARGETS__|$files|" scripts/index-template.html > apps/loader/public/index.html
+
+          # manifest.json
+          echo "$files" > apps/loader/public/manifest.json
+
+          # catalog.html
+          list_html=""
+          for file in $files_raw; do
+            list_html="$list_html<li><span class=\"url\">$file</span></li>"
+          done
+          sed "s|__CATALOG_LIST__|$list_html|" scripts/catalog-template.html > apps/loader/public/catalog.html
+
+      - name: 📤 Commit & Push if changed
         run: |
           git config user.name "popdeuxrem"
           git config user.email "174709939+popdeuxrem@users.noreply.github.com"
-          git add apps/loader/public/
+          git add apps/loader/public/obfuscated/ apps/loader/public/index.html apps/loader/public/manifest.json apps/loader/public/catalog.html
           git diff --cached --quiet || (git commit -m "🔁 Obfuscate, generate, deploy [skip ci]" && git push)
 
       - name: 🚀 Deploy to GitHub Pages
@@ -72,18 +83,11 @@ jobs:
           publish_dir: ./apps/loader/public
           publish_branch: gh-pages
 
-      - name: 💬 Discord notification (success)
-        if: success() && env.DISCORD_WEBHOOK != ''
+      - name: 💬 Discord notification
+        if: env.DISCORD_WEBHOOK != ''
         run: |
           commit_url="https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
           num_scripts=$(ls apps/loader/public/obfuscated/*.js.b64 | wc -l)
           curl -X POST -H "Content-Type: application/json" \
-            -d "{\"username\": \"ShadowScriptsBot\", \"content\": \"✅ Deployed $num_scripts spoof scripts. [View Commit]($commit_url) | [Catalog](https://popdeuxrem.github.io/shadow-scripts/catalog.html)\"}" \
-            "$DISCORD_WEBHOOK"
-
-      - name: 💥 Discord notification (failure)
-        if: failure() && env.DISCORD_WEBHOOK != ''
-        run: |
-          curl -X POST -H "Content-Type: application/json" \
-            -d "{\"username\": \"ShadowScriptsBot\", \"content\": \"❌ Workflow failed for commit ${{ github.sha }}. Review and fix urgently.\"}" \
+            -d "{\"username\": \"ShadowScriptsBot\", \"content\": \"Deployed $num_scripts spoof scripts. [View Commit]($commit_url) | [Catalog](https://popdeuxrem.github.io/shadow-scripts/catalog.html)\"}" \
             "$DISCORD_WEBHOOK"
