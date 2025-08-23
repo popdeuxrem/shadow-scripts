@@ -1,25 +1,41 @@
-name: 🔁 Stealth Loader: Obfuscate, Generate, Deploy, Notify (Bash Only)
+name: 🔁 Full Stealth Loader: Obfuscate, Generate, Deploy, Notify (TS)
 
 on:
+  push:
+    paths:
+      - 'src-scripts/**/*.js'
+      - 'scripts/**/*.js'
+      - 'scripts/*.ts'
+      - 'scripts/index-template.html'
+      - 'scripts/catalog-template.html'
+      - '.github/workflows/update-index.yml'
   schedule:
     - cron: "0 */6 * * *"
   workflow_dispatch:
+
+env:
+  DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
 
 jobs:
   update:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout Repository
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
+
+      - name: 🛠 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
 
       - name: 📦 Install global tooling
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
-          npm install -g javascript-obfuscator
+          npm install -g typescript ts-node javascript-obfuscator
 
-      - name: 🔐 Obfuscate and Base64-encode all spoof scripts (recursive)
+      - name: 🔐 Obfuscate & base64 encode all spoof scripts
         run: |
           OUTDIR="apps/loader/public/obfuscated"
           SRCDIRS="src-scripts scripts/auth scripts/device scripts/finance scripts/location scripts/network scripts/security scripts/social"
@@ -30,14 +46,14 @@ jobs:
             base64 "$OUTDIR/${base}.ob.js" > "$OUTDIR/${base}.js.b64"
           done
 
-      - name: 🔁 Generate loader, manifest, catalog with gen-configs.sh
-        run: bash scripts/gen-configs.sh
+      - name: 🧠 Generate loader, manifest, catalog using gen-configs.ts
+        run: npx ts-node scripts/gen-configs.ts
 
-      - name: 📤 Commit & Push if changed
+      - name: 📤 Commit & push changes (if any)
         run: |
           git config user.name "popdeuxrem"
           git config user.email "174709939+popdeuxrem@users.noreply.github.com"
-          git add apps/loader/public/obfuscated/ apps/loader/public/index.html apps/loader/public/manifest.json apps/loader/public/catalog.html
+          git add apps/loader/public/
           git diff --cached --quiet || (git commit -m "🔁 Obfuscate, generate, deploy [skip ci]" && git push)
 
       - name: 🚀 Deploy to GitHub Pages
@@ -47,11 +63,11 @@ jobs:
           publish_dir: ./apps/loader/public
           publish_branch: gh-pages
 
-      - name: 💬 Discord notification
+      - name: 💬 Discord Notification
         if: env.DISCORD_WEBHOOK != ''
         run: |
           commit_url="https://github.com/${{ github.repository }}/commit/${{ github.sha }}"
           num_scripts=$(ls apps/loader/public/obfuscated/*.js.b64 | wc -l)
           curl -X POST -H "Content-Type: application/json" \
-            -d "{\"username\": \"ShadowScriptsBot\", \"content\": \"Deployed $num_scripts spoof scripts. [View Commit]($commit_url) | [Catalog](https://popdeuxrem.github.io/shadow-scripts/catalog.html)\"}" \
+            -d "{\"username\": \"ShadowScriptsBot\", \"content\": \"🔁 Deployed $num_scripts spoof scripts. [View Commit]($commit_url) | [Catalog](https://popdeuxrem.github.io/shadow-scripts/catalog.html)\"}" \
             "$DISCORD_WEBHOOK"
