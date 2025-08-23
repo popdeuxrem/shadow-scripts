@@ -10,11 +10,11 @@
       <key>PayloadDisplayName</key>
       <string>Stealth DNS/Proxy</string>
       <key>PayloadIdentifier</key>
-      <string>com.shadow.F8D7591C-5FAB-47C7-A1B5-CA24FFFE9771</string>
+      <string>com.shadow.34911D87-B71D-4811-B426-37A2563AB85E</string>
       <key>PayloadType</key>
       <string>com.apple.dnsSettings.managed</string>
       <key>PayloadUUID</key>
-      <string>F8D7591C-5FAB-47C7-A1B5-CA24FFFE9771</string>
+      <string>34911D87-B71D-4811-B426-37A2563AB85E</string>
       <key>PayloadVersion</key>
       <integer>1</integer>
       <key>DNSSettings</key>
@@ -23,19 +23,25 @@
         <array>
           <string>premiusa1.vpnjantit.com</string>
         </array>
+        <key>SupplementalMatchDomains</key>
+        <array>
+          <string>.</string>
+        </array>
+        <key>MatchDomainsNoSearch</key>
+        <true/>
       </dict>
     </dict>
   </array>
   <key>PayloadDisplayName</key>
   <string>Stealth DNS/Proxy</string>
   <key>PayloadIdentifier</key>
-  <string>com.shadow.F8D7591C-5FAB-47C7-A1B5-CA24FFFE9771</string>
+  <string>com.shadow.34911D87-B71D-4811-B426-37A2563AB85E</string>
   <key>PayloadRemovalDisallowed</key>
   <false/>
   <key>PayloadType</key>
   <string>Configuration</string>
   <key>PayloadUUID</key>
-  <string>F8D7591C-5FAB-47C7-A1B5-CA24FFFE9771</string>
+  <string>34911D87-B71D-4811-B426-37A2563AB85E</string>
   <key>PayloadVersion</key>
   <integer>1</integer>
 </dict>
