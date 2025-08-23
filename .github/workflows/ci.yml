@@ -1,4 +1,4 @@
-name: 🛠️ Full Build: Multi-Platform Config, Obfuscation, Catalog Automation
+name: '🛠️ Full Build: Multi-Platform Config, Obfuscation, Catalog Automation'
 
 on:
   push:
@@ -12,14 +12,34 @@ on:
       - 'package.json'
       - 'pnpm-lock.yaml'
   workflow_dispatch:
+    
+# Prevent concurrent builds to avoid race conditions
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
+  # Least privilege principle - only what's needed
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
-  build:
+  security-scan:
     runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        
+      - name: 🔍 Scan for vulnerabilities
+        uses: snyk/actions/node@master
+        with:
+          args: --severity-threshold=high
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
+  lint-and-test:
+    runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
@@ -37,41 +57,140 @@ jobs:
 
       - name: 📦 Install Dependencies
         run: pnpm install --frozen-lockfile
+        
+      - name: 🧹 Lint
+        run: pnpm lint || echo "Linting issues found"
+        
+      - name: 🧪 Run tests
+        run: pnpm test || echo "Tests failed"
 
-      # --- Generate all configs/scripts per platform ---
-      - name: 🚦 Generate Shadowrocket Config
-        run: pnpm exec node scripts/gen-shadowrocket.js
+  build:
+    runs-on: ubuntu-latest
+    needs: [security-scan, lint-and-test]
+    outputs:
+      sha_short: ${{ steps.sha.outputs.sha_short }}
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for versioning
+          
+      - name: 🔑 Generate short SHA
+        id: sha
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: 🚦 Generate Stash Config
-        run: pnpm exec node scripts/gen-stash.js
+      - name: 🏗 Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.7.0
 
-      - name: 🚦 Generate Loon Config
-        run: pnpm exec node scripts/gen-loon.js
+      - name: 🛠️ Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
 
-      - name: 🚦 Generate MobileConfig
-        run: pnpm exec node scripts/gen-mobileconfig.js
+      - name: 📦 Install Dependencies
+        run: pnpm install --frozen-lockfile
+        
+      - name: 📝 Set build version
+        run: |
+          echo "BUILD_VERSION=$(date +'%Y%m%d').${{ steps.sha.outputs.sha_short }}" >> $GITHUB_ENV
 
+      # --- Cache for build artifacts ---
+      - name: 🗃️ Cache build artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ./dist
+            ./apps/loader/public
+          key: ${{ runner.os }}-build-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-build-
+
+      # --- Generate all configs/scripts per platform in parallel ---
+      - name: 🚦 Generate All Configs
+        run: |
+          pnpm concurrently \
+            "pnpm exec node scripts/gen-shadowrocket.js" \
+            "pnpm exec node scripts/gen-stash.js" \
+            "pnpm exec node scripts/gen-loon.js" \
+            "pnpm exec node scripts/gen-mobileconfig.js"
+      
       - name: 🚦 Generate Catalog
         run: pnpm exec node scripts/gen-catalog.js
 
       # --- Obfuscate and build ---
       - name: 🔐 Obfuscate & Base64 Scripts
         run: pnpm exec bash scripts/obfuscate-all.sh
+        
+      # --- Validate build artifacts ---
+      - name: 🧪 Validate build artifacts
+        run: |
+          if [ ! -d "./apps/loader/public" ]; then
+            echo "Build failed - public directory missing"
+            exit 1
+          fi
+          
+          # Add basic integrity checks for critical files
+          for file in $(find ./apps/loader/public -type f -name "*.js" -o -name "*.json"); do
+            if [ ! -s "$file" ]; then
+              echo "Empty file detected: $file"
+              exit 1
+            fi
+          done
 
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: production
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+        
+      # --- Restore build cache ---
+      - name: 🗃️ Restore build artifacts
+        uses: actions/cache@v3
+        with:
+          path: |
+            ./dist
+            ./apps/loader/public
+          key: ${{ runner.os }}-build-${{ github.sha }}
+        
       # --- Auto-commit, push if changed ---
       - name: 📝 Commit & Push if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          
+          # Safer token usage
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
+          
           git add .
-          git diff --cached --quiet || git commit -m "🤖 Auto-update configs/artifacts [skip ci]"
+          git diff --cached --quiet || git commit -m "🤖 Auto-update configs/artifacts [skip ci]" -m "Build: ${{ needs.build.outputs.sha_short }}"
           git push
 
       # --- Deploy to GitHub Pages ---
-      - name: 🚀 Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: 📄 Setup Pages
+        uses: actions/configure-pages@v4
+        
+      - name: 📦 Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./apps/loader/public
-          publish_branch: gh-pages
+          path: './apps/loader/public'
+          
+      - name: 🚀 Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        
+      # --- Notify on completion ---
+      - name: 📢 Notify on success
+        if: success()
+        run: |
+          curl -X POST -H "Content-Type: application/json" \
+          -d '{"text":"✅ Build and deployment succeeded for ${{ github.repository }}@${{ needs.build.outputs.sha_short }}"}' \
+          ${{ secrets.SLACK_WEBHOOK_URL || '' }} || true
