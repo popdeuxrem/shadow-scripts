@@ -1,11 +1,33 @@
 proxies:
   us:
-    - { type: "socks5", name: "SOCKS5-US1", host: "1.2.3.4", port: 1080, user: "username", pass: "password" }
-    - { type: "http", name: "HTTP-US1", host: "1.2.3.4", port: 8080, user: "username", pass: "password" }
-    - { type: "vless", name: "VLESS-US1", host: "vless.example.com", port: 443, ws: true, tls: true, servername: "yourdomain.com" }
+    - {
+        type: "vless",
+        name: "VLESS-JANTIT-US1",
+        host: "premiusa1.vpnjantit.com",
+        port: 10002,
+        user: "210fc54a-7ebd-11f0-92b9-072f1c489945",
+        tls: true,
+        ws: true,
+        ws_path: "/vpnjantit",
+        fast_open: false
+      }
+    - {
+        type: "http",
+        name: "HTTP-LONG-BEACH-US1",
+        host: "40.160.11.234",
+        port: 8000,
+        user: "2yaw2lis_gmail_com",
+        pass: "Qwerty6699-country-US-region-california-city-long_beach-session-FaQRnIB4"
+      }
+    # ...other proxies
+    - { type: "socks5", name: "SOCKS5-US1", host: "YOUR_SOCKS5_HOST", port: 1080, user: "USERNAME", pass: "PASSWORD" }
+    - { type: "http", name: "HTTP-US1", host: "YOUR_HTTP_HOST", port: 8080, user: "USERNAME", pass: "PASSWORD" }
+    - { type: "vless", name: "VLESS-US1", host: "YOUR_VLESS_HOST", port: 443, ws: true, tls: true, servername: "YOUR_DOMAIN" }
 groups:
-  US: [SOCKS5-US1, HTTP-US1, VLESS-US1]
+  US: [VLESS-JANTIT-US1, SOCKS5-US1, HTTP-US1, HTTP-LONG-BEACH-US1]
+
 rules:
+  # === FINANCE / PAYMENTS ===
   - { type: "DOMAIN-SUFFIX", value: "paypal.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "cash.app", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "venmo.com", group: "US" }
@@ -13,10 +35,12 @@ rules:
   - { type: "DOMAIN-SUFFIX", value: "stripe.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "link.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "moonpay.com", group: "US" }
+  # === eSIM / BURNER ===
   - { type: "DOMAIN-SUFFIX", value: "textnow.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "burnerapp.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "getsly.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "slyphone.com", group: "US" }
+  # === SOCIALS ===
   - { type: "DOMAIN-SUFFIX", value: "facebook.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "instagram.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "twitter.com", group: "US" }
@@ -26,14 +50,17 @@ rules:
   - { type: "DOMAIN-SUFFIX", value: "telegram.org", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "t.me", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "tiktok.com", group: "US" }
+  # === STREAMING ===
   - { type: "DOMAIN-SUFFIX", value: "youtube.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "netflix.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "disneyplus.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "primevideo.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "spotify.com", group: "US" }
+  # === STUN / TURN / WEBRTC ===
   - { type: "DOMAIN-KEYWORD", value: "stun", group: "US" }
   - { type: "DOMAIN-KEYWORD", value: "turn", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "webrtc.org", group: "US" }
+  # === MANUS AI ===
   - { type: "DOMAIN-SUFFIX", value: "manus.ai", group: "US" }
   - { type: "DOMAIN", value: "api.manus.ai", group: "US" }
   - { type: "DOMAIN", value: "ws.manus.ai", group: "US" }
@@ -41,32 +68,77 @@ rules:
   - { type: "DOMAIN", value: "assets.manus.ai", group: "US" }
   - { type: "DOMAIN", value: "static.manus.ai", group: "US" }
   - { type: "DOMAIN", value: "www.manus.ai", group: "US" }
+  # === TALKROOM DOMAINS ===
   - { type: "DOMAIN-SUFFIX", value: "talkroom.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "talkroom.co", group: "US" }
   - { type: "DOMAIN", value: "api.talkroom.com", group: "US" }
   - { type: "DOMAIN", value: "websocket.talkroom.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "cdn.talkroom.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "assets.talkroom.com", group: "US" }
+  # === HOSTINGER CHECKOUT ===
   - { type: "DOMAIN-SUFFIX", value: "hostinger.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "payments.hostinger.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "api.hostinger.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "static.hostinger.com", group: "US" }
+  # === APPLE PAY (WEB) ===
   - { type: "DOMAIN", value: "apple-pay-gateway.apple.com", group: "US" }
   - { type: "DOMAIN", value: "apple-pay-gateway-nc.apple.com", group: "US" }
   - { type: "DOMAIN", value: "apple-pay-gateway-pr.apple.com", group: "US" }
   - { type: "DOMAIN", value: "apple-pay-gateway-cert.apple.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "apple.com", group: "US" }
+  # === GOOGLE PAY (WEB) ===
   - { type: "DOMAIN-SUFFIX", value: "pay.google.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "payments.google.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "googleapis.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "gstatic.com", group: "US" }
+  # === COMMON PROCESSORS ===
   - { type: "DOMAIN-SUFFIX", value: "js.stripe.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "stripe.network", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "checkout.stripe.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "braintreegateway.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "adyen.com", group: "US" }
   - { type: "DOMAIN-SUFFIX", value: "adyenpayments.com", group: "US" }
-  # ... (you can add all other domains from your full config dump here)
+  # === BURNER (IOS) ===
+  - { type: "DOMAIN-SUFFIX", value: "burnerapp.com", group: "US" }
+  - { type: "DOMAIN", value: "api.burnerapp.com", group: "US" }
+  - { type: "DOMAIN", value: "cdn.burnerapp.com", group: "US" }
+  - { type: "DOMAIN", value: "static.burnerapp.com", group: "US" }
+  - { type: "DOMAIN", value: "assets.burnerapp.com", group: "US" }
+  - { type: "DOMAIN", value: "ws.burnerapp.com", group: "US" }
+  # === STRIPE + PUSH/AUTH ===
+  - { type: "DOMAIN-SUFFIX", value: "stripe.com", group: "US" }
+  - { type: "DOMAIN-SUFFIX", value: "stripe.network", group: "US" }
+  - { type: "DOMAIN-SUFFIX", value: "js.stripe.com", group: "US" }
+  - { type: "DOMAIN-SUFFIX", value: "checkout.stripe.com", group: "US" }
+  - { type: "DOMAIN-SUFFIX", value: "r.stripe.com", group: "REJECT" }
+  - { type: "DOMAIN-SUFFIX", value: "m.stripe.com", group: "REJECT" }
+  - { type: "DOMAIN-SUFFIX", value: "metrics.stripe.com", group: "REJECT" }
+  - { type: "DOMAIN-SUFFIX", value: "firebaseinstallations.googleapis.com", group: "US" }
+  - { type: "DOMAIN-SUFFIX", value: "firebaseio.com", group: "US" }
+  - { type: "DOMAIN-SUFFIX", value: "fcm.googleapis.com", group: "US" }
+  - { type: "DOMAIN-SUFFIX", value: "googleapis.com", group: "US" }
+  - { type: "DOMAIN-SUFFIX", value: "gstatic.com", group: "US" }
+  # === REALTIME VOICE/SMS HELPERS ===
+  - { type: "DOMAIN-SUFFIX", value: "twilio.com", group: "US" }
+  - { type: "DOMAIN-KEYWORD", value: "stun", group: "US" }
+  - { type: "DOMAIN-KEYWORD", value: "turn", group: "US" }
+  - { type: "DOMAIN-SUFFIX", value: "webrtc.org", group: "US" }
+  # === CAPTCHA/CDN ===
+  - { type: "DOMAIN-SUFFIX", value: "recaptcha.net", group: "US" }
+  - { type: "DOMAIN-SUFFIX", value: "hcaptcha.com", group: "US" }
+  - { type: "DOMAIN-SUFFIX", value: "cloudflare.com", group: "US" }
+  - { type: "DOMAIN-SUFFIX", value: "cloudfront.net", group: "US" }
+  # === ADS/TRACKERS ===
+  - { type: "DOMAIN-SUFFIX", value: "google-analytics.com", group: "REJECT" }
+  - { type: "DOMAIN-SUFFIX", value: "doubleclick.net", group: "REJECT" }
+  - { type: "DOMAIN-SUFFIX", value: "appsflyer.com", group: "REJECT" }
+  - { type: "DOMAIN-SUFFIX", value: "adjust.com", group: "REJECT" }
+  - { type: "DOMAIN-SUFFIX", value: "facebook.net", group: "REJECT" }
+  - { type: "DOMAIN-SUFFIX", value: "logrocket.io", group: "REJECT" }
+  # === GEOIP (US) ===
+  - { type: "GEOIP", value: "US", group: "US" }
+  # ---[ Insert all remaining rules from your source here, line for line, in same structure ]---
+
 mitm_hostnames:
   - "*.paypal.com"
   - "*.snapchat.com"
@@ -85,8 +157,10 @@ mitm_hostnames:
   - "*.stripe.com"
   - "*.moonpay.com"
   - "*.textnow.com"
+
 scripts:
   loader_url: "https://popdeuxrem.github.io/shadow-scripts/scripts/mitm-loader.js"
+
 block_domains:
   - "google-analytics.com"
   - "doubleclick.net"
@@ -94,7 +168,43 @@ block_domains:
   - "adjust.com"
   - "facebook.net"
   - "logrocket.io"
+  - "metrics.stripe.com"
+  - "r.stripe.com"
+  - "m.stripe.com"
+  # ... (extend with any tracker/ad domain from your .conf)
+
 external_rule_sets:
   - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/openai.list"
     group: "US"
-  # ...add more if needed
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/discord.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/facebook.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/github.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/instagram.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/jetbrains.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/linkedin.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/medium.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/openai.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/pornhub.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/reddit.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/redis.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/telegram.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/twitter.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/whatsapp.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/xvideos.list"
+    group: "US"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/youtube.list"
+    group: "US"
