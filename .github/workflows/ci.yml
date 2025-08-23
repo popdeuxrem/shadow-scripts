@@ -1,28 +1,48 @@
-name: CI
+name: 🛠 Full Build, Obfuscate, Generate Configs, Deploy
 
-on: [push, pull_request]
+on:
+  push:
+    paths:
+      - 'src-scripts/**/*.js'
+      - 'scripts/*.js'
+      - 'configs/master-rules.yaml'
+      - '.github/workflows/ci.yml'
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          # cache: pnpm   # REMOVE THIS LINE
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
 
-      - name: ⬇️ Install dependencies
-        run: pnpm install
+      # Obfuscate, build loader/manifest/catalog here (insert your existing steps/scripts)
 
-      - name: 🔧 Generate configs
-        run: pnpm gen-configs
+      - run: node scripts/gen-shadowrocket.js
+      - run: node scripts/gen-stash.js
+      - run: node scripts/gen-loon.js
+      - run: node scripts/gen-mobileconfig.js
 
-      - name: 🛠 Build loader
-        run: pnpm --filter @shadow/loader build
+      # Manifest/catalog builder
+      - run: node scripts/gen-catalog.js
 
-      - name: 🧪 Test (do not fail CI)
-        run: pnpm test || true
+      - name: 📤 Commit & Push if changed
+        run: |
+          git config user.name "popdeuxrem"
+          git config user.email "174709939+popdeuxrem@users.noreply.github.com"
+          git add apps/loader/public/configs/*
+          git diff --cached --quiet || (git commit -m "🔁 Update all platform configs [skip ci]" && git push)
+
+      - name: 🚀 Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./apps/loader/public
+          publish_branch: gh-pages

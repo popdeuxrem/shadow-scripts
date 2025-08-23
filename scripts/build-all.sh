@@ -1,40 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Determine the repo root (works from anywhere)
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
-SRC_DIR="$ROOT/src-scripts"
-OUT_DIR="$ROOT/apps/loader/public/scripts"
-MANIFEST="$OUT_DIR/manifest.json"
+cd "$ROOT"
 
-echo "=== [1/4] Generating all configs ==="
-pnpm gen-configs
+CONF_OUT="apps/loader/public/configs"
+OBF_OUT="apps/loader/public/obfuscated"
+SRC_SCRIPTS="src-scripts"
 
-echo "=== [2/4] Obfuscating scripts and refreshing manifest ==="
-rm -rf "$OUT_DIR"
-mkdir -p "$OUT_DIR"
-echo "{" > "$MANIFEST"
-first=1
-for f in "$SRC_DIR"/*.js; do
-  [ -f "$f" ] || continue
-  base=$(basename "$f")
-  out="$OUT_DIR/$base"
-  npx javascript-obfuscator "$f" --output "$out" --compact true --self-defending true --control-flow-flattening true
-  if [ $first -eq 0 ]; then echo "," >> "$MANIFEST"; fi
-  echo -n "  \"$base\": \"$base\"" >> "$MANIFEST"
-  first=0
+echo "=== [1/6] Clean outputs ==="
+rm -rf "$CONF_OUT" "$OBF_OUT"
+mkdir -p "$CONF_OUT" "$OBF_OUT"
+
+echo "=== [2/6] Generate multi-platform configs ==="
+node scripts/gen-shadowrocket.js
+node scripts/gen-stash.js
+node scripts/gen-loon.js
+node scripts/gen-mobileconfig.js
+
+echo "=== [3/6] Obfuscate and Base64-encode scripts ==="
+find "$SRC_SCRIPTS" -type f -name "*.js" | while read src; do
+  base=$(basename "$src" .js)
+  obf="$OBF_OUT/$base.ob.js"
+  b64="$OBF_OUT/$base.js.b64"
+  npx javascript-obfuscator "$src" --output "$obf" --compact true --self-defending true --control-flow-flattening true
+  base64 "$obf" > "$b64"
 done
-echo -e "\n}" >> "$MANIFEST"
-echo "Obfuscated scripts and refreshed manifest at $MANIFEST"
 
-echo "=== [3/4] Building loader app ==="
-pnpm --filter @shadow/loader build
+echo "=== [4/6] Generate catalog and manifest ==="
+node scripts/gen-catalog.js
 
-echo "=== [4/4] All done ==="
-echo "Configs: $ROOT/apps/loader/public/configs/"
-echo "Obfuscated scripts: $OUT_DIR"
-echo "Manifest: $MANIFEST"
+echo "=== [5/6] Validate configs ==="
+node scripts/validate-configs.js
 
-# Optional: open the configs/scripts dir if on macOS
-if command -v open >/dev/null 2>&1; then
-  open "$ROOT/apps/loader/public/"
-fi
+echo "=== [6/6] Summary ==="
+ls -lh "$CONF_OUT"
+ls -lh "$OBF_OUT"
+echo "Catalog: $ROOT/apps/loader/public/catalog.html"
+
+echo "=== Build complete. Ready for deploy/CI. ==="

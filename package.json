@@ -1,28 +1,16 @@
 {
   "name": "stealth-proxy-monorepo",
   "private": true,
-  "packageManager": "pnpm@9.7.0",
-  "type": "module",
-  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "build": "turbo run build",
-    "typecheck": "turbo run typecheck",
-    "lint": "turbo run lint",
-    "gen-configs": "tsx scripts/gen-configs.ts",
-    "obfuscate:refresh": "tsx scripts/obfuscate-refresh.ts"
+    "lint": "echo \"No lint script configured\"",
+    "test": "echo \"No tests specified\""
   },
   "devDependencies": {
-    "@types/node": "^22.5.4",
-    "@typescript-eslint/eslint-plugin": "^8.2.0",
-    "@typescript-eslint/parser": "^8.2.0",
-    "eslint": "^9.9.0",
-    "prettier": "^3.3.3",
-    "turbo": "^2.0.9",
-    "typescript": "^5.6.2",
-    "vitest": "^2.1.1",
-    "tsx": "^4.16.2",
+    "@types/js-yaml": "^4.0.9",
+    "javascript-obfuscator": "^4.1.1",
     "js-yaml": "^4.1.0",
-    "zod": "^3.23.8",
-    "javascript-obfuscator": "^4.1.0"
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2",
+    "uuid": "^11.1.0"
   }
 }
