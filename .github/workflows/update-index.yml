@@ -31,7 +31,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
-          npm install -g javascript-obfuscator
+          npm install -g pnpm javascript-obfuscator
+
+      - name: ⬇️ Install dependencies (no lock required)
+        run: pnpm install
 
       - name: 🔐 Obfuscate and Base64-encode all spoof scripts (recursive, monorepo)
         run: |
