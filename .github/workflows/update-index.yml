@@ -29,7 +29,9 @@ jobs:
 
       - name: 📦 Install tooling
         run: |
-          npm install -g javascript-obfuscator jq
+          sudo apt-get update
+          sudo apt-get install -y jq
+          npm install -g javascript-obfuscator
 
       - name: 🔐 Obfuscate and Base64-encode all spoof scripts (recursive, monorepo)
         run: |
