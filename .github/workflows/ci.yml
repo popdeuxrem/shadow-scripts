@@ -25,6 +25,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     outputs:
       sha_short: ${{ steps.sha.outputs.sha_short }}
       
@@ -56,25 +59,11 @@ jobs:
         run: |
           echo "BUILD_VERSION=$(date +'%Y%m%d').${{ steps.sha.outputs.sha_short }}" >> $GITHUB_ENV
 
-      # Consolidated build step
-      - name: 🔨 Build everything (loader, obfuscation, configs, catalog)
+      - name: 🔨 Build everything
         run: |
           chmod +x scripts/build-all.sh
           ./scripts/build-all.sh
           
-          # Debug output to understand what's happening with empty files
-          ls -la ./apps/loader/public/obfuscated/
-          wc -c ./apps/loader/public/obfuscated/*.ob.js || true
-        
-      # Skip validation for now to debug the process
-      # - name: 🧪 Validate build artifacts
-      #   run: |
-      #     if [ ! -d "./apps/loader/public" ]; then
-      #       echo "Build failed - public directory missing"
-      #       exit 1
-      #     fi
-
-      # Auto-commit changes
       - name: 📝 Commit & Push if changed
         run: |
           git config user.name "github-actions[bot]"
@@ -82,7 +71,6 @@ jobs:
           git add .
           git diff --cached --quiet || (git commit -m "🤖 Auto-update configs/artifacts [skip ci]" -m "Build: ${{ steps.sha.outputs.sha_short }}" && git push)
           
-      # Deploy steps
       - name: 📄 Setup Pages
         uses: actions/configure-pages@v4
         
