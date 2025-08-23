@@ -12,5 +12,6 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2",
     "uuid": "^11.1.0"
-  }
+  },
+  "packageManager": "pnpm@9.7.0"
 }
