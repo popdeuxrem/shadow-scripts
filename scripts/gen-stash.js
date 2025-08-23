@@ -1,60 +1,81 @@
-// scripts/gen-stash.js
-const fs = require('fs');
+#!/usr/bin/env node
+/**
+ * master-rules.yaml -> stash.conf
+ */
+const fs   = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 
-const OUTPUT = path.resolve(__dirname, '../apps/loader/public/configs/stash.conf');
-const RULES_FILE = path.resolve(__dirname, '../configs/master-rules.yaml');
-const DNS_SERVER = process.env.DNS_SERVER || '1.1.1.1';
+const ROOT   = path.resolve(__dirname, '..');
+const SRC    = path.join(ROOT, 'configs/master-rules.yaml');
+const OUTDIR = path.join(ROOT, 'apps/loader/public/configs');
+const OUT    = path.join(OUTDIR, 'stash.conf');
 
-function parseRules() {
-  if (!fs.existsSync(RULES_FILE)) {
-    throw new Error(`Rules file not found: ${RULES_FILE}`);
+const doc = yaml.load(fs.readFileSync(SRC, 'utf8'));
+const out = [];
+
+/* ---------- General ---------- */
+out.push('[General]');
+out.push(`dns-server = ${doc.dns || '1.1.1.1'}`);
+out.push('skip-proxy = 192.168.0.0/16, 10.0.0.0/8');
+out.push('');
+
+/* ---------- Proxy ---------- */
+out.push('[Proxy]');
+for (const region in doc.proxies || {}) {
+  for (const p of doc.proxies[region]) {
+    const line = [
+      p.name,
+      p.type,
+      p.host,
+      p.port,
+      p.user && `username=${p.user}`,
+      p.pass && `password=${p.pass}`,
+      p.tls  && 'tls=true',
+      p.ws   && 'ws=true',
+      p.ws_path && `ws-path=${p.ws_path}`,
+      p.fast_open !== undefined && `fast-open=${p.fast_open}`
+    ].filter(Boolean).join(', ');
+    out.push(line);
   }
-  return yaml.load(fs.readFileSync(RULES_FILE, 'utf8'));
+}
+out.push('');
+
+/* ---------- Proxy Group ---------- */
+out.push('[Proxy Group]');
+for (const g in doc.groups || {}) {
+  out.push(`${g} = select, ${doc.groups[g].join(', ')}`);
+}
+out.push('');
+
+/* ---------- Rule ---------- */
+out.push('[Rule]');
+(doc.rules || []).forEach(r => {
+  const str = typeof r === 'string'
+    ? r
+    : `${r.type},${r.value},${r.group}`;
+  out.push(str);
+});
+(doc.external_rule_sets || []).forEach(e=>{
+  out.push(`RULE-SET,${e.url},${e.group}`);
+});
+(doc.block_domains || []).forEach(d=>{
+  out.push(`DOMAIN-SUFFIX,${d},REJECT`);
+});
+out.push('FINAL,Auto-All');
+
+/* ---------- MITM ---------- */
+if (doc.mitm_hostnames?.length) {
+  out.push('\n[MITM]');
+  out.push(`hostname = ${doc.mitm_hostnames.join(', ')}`);
 }
 
-function renderStash(rules, dns) {
-  let out = [];
-
-  out.push(`[General]`);
-  out.push(`dns-server = ${dns}`);
-
-  // Proxies
-  if (rules?.proxies && Array.isArray(rules.proxies)) {
-    out.push(`\n[Proxy]`);
-    for (const p of rules.proxies) {
-      out.push(`${p.name} = ${p.type},${p.server},${p.port}${p.username ? ',' + p.username : ''}${p.password ? ',' + p.password : ''}`);
-    }
-  }
-
-  // Proxy Groups
-  if (rules?.proxy_groups && Array.isArray(rules.proxy_groups)) {
-    out.push(`\n[Proxy Group]`);
-    for (const g of rules.proxy_groups) {
-      out.push(`${g.name} = ${g.type}, ${g.proxies?.join(', ')}`);
-    }
-  }
-
-  // Rules
-  if (rules?.rules && Array.isArray(rules.rules)) {
-    out.push(`\n[Rule]`);
-    for (const r of rules.rules) {
-      out.push(r);
-    }
-  }
-
-  return out.join('\n') + '\n';
+/* ---------- Script ---------- */
+if (doc.scripts?.loader_url) {
+  out.push('\n[Script]');
+  out.push(`http-response ^https?:\/\/.+ script-response-body ${doc.scripts.loader_url}`);
 }
 
-function main() {
-  const rules = parseRules();
-  const conf = renderStash(rules, DNS_SERVER);
-  fs.mkdirSync(path.dirname(OUTPUT), { recursive: true });
-  fs.writeFileSync(OUTPUT, conf);
-  console.log(`Wrote: ${OUTPUT}`);
-}
-
-if (require.main === module) {
-  main();
-}
+fs.mkdirSync(OUTDIR, {recursive:true});
+fs.writeFileSync(OUT, out.join('\n') + '\n');
+console.log('Wrote', OUT);
