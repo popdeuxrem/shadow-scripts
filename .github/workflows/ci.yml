@@ -1,17 +1,17 @@
-name: 🛠️ Full Build: Multi-Platform Config, Obfuscation, Catalog Automation
+name: "🛠️ Full Build: Multi-Platform Config, Obfuscation, Catalog Automation"
 
 on:
   push:
     paths:
-      - 'src-scripts/**/*.js'
-      - 'scripts/**/*.js'
-      - 'scripts/**/*.ts'
-      - 'scripts/**/*.sh'
-      - 'configs/master-rules.yaml'
-      - 'scripts/manifest-loader.html'
-      - '.github/workflows/ci.yml'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
+      - "src-scripts/**/*.js"
+      - "scripts/**/*.js"
+      - "scripts/**/*.ts"
+      - "scripts/**/*.sh"
+      - "configs/master-rules.yaml"
+      - "scripts/manifest-loader.html"
+      - ".github/workflows/ci.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
   workflow_dispatch:
 
 concurrency:
@@ -30,45 +30,45 @@ jobs:
       sha_short: ${{ steps.sha.outputs.sha_short }}
 
     steps:
-      - name: 📥 Checkout
+      - name: "📥 Checkout"
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: 🔑 Generate short SHA
+      - name: "🔑 Generate short SHA"
         id: sha
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      - name: 🏗 Setup pnpm
+      - name: "🏗 Setup pnpm"
         uses: pnpm/action-setup@v4
         with:
           version: 9.7.0
 
-      - name: 🛠️ Setup Node.js
+      - name: "🛠️ Setup Node.js"
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
 
-      - name: 📦 Install Dependencies
+      - name: "📦 Install Dependencies"
         run: pnpm install --frozen-lockfile
 
-      - name: 🔍 Audit dependencies
+      - name: "🔍 Audit dependencies"
         run: pnpm audit --audit-level=high || echo "Security vulnerabilities found"
 
-      - name: 📝 Set build version
+      - name: "📝 Set build version"
         run: echo "BUILD_VERSION=$(date +'%Y%m%d').${{ steps.sha.outputs.sha_short }}" >> $GITHUB_ENV
 
-      - name: 🔨 Build all
+      - name: "🔨 Build all"
         run: |
           chmod +x scripts/build-all.sh
           ./scripts/build-all.sh
 
-      - name: 🗂 Copy manifest loader as index.html
+      - name: "🗂 Copy manifest loader as index.html"
         run: |
           cp scripts/manifest-loader.html apps/loader/public/index.html
 
-      - name: 🧪 Validate build artifacts
+      - name: "🧪 Validate build artifacts"
         run: |
           if [ ! -d "./apps/loader/public" ]; then
             echo "Build failed - public directory missing"
@@ -81,29 +81,29 @@ jobs:
             fi
           '
 
-      - name: 📝 Commit & Push if changed
+      - name: "📝 Commit & Push if changed"
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .
           git diff --cached --quiet || (git commit -m "🤖 Auto-update configs/artifacts [skip ci]" -m "Build: ${{ steps.sha.outputs.sha_short }}" && git push)
 
-      - name: 📄 Setup Pages
+      - name: "📄 Setup Pages"
         uses: actions/configure-pages@v4
 
-      - name: 📦 Upload Pages Artifact
+      - name: "📦 Upload Pages Artifact"
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './apps/loader/public'
+          path: "./apps/loader/public"
 
-      - name: 🚀 Deploy to GitHub Pages
+      - name: "🚀 Deploy to GitHub Pages"
         id: deployment
         uses: actions/deploy-pages@v4
         environment:
           name: github-pages
 
-      - name: 📢 Send notification
-        if: success() && env.DISCORD_WEBHOOK != ''
+      - name: "📢 Send notification"
+        if: success() && env.DISCORD_WEBHOOK != ""
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
