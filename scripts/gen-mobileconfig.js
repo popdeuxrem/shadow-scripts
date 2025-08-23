@@ -1,73 +1,96 @@
-// scripts/gen-mobileconfig.js
-const fs = require("fs");
-const { v4: uuidv4 } = require("uuid");
+#!/usr/bin/env node
 
-const {
-  DNS_SERVER = "premiusa1.vpnjantit.com",          // Fallback to your host
-  DNS_PROTOCOL,                                    // 'https' (DoH), 'tls' (DoT), or empty
-  DOH_URL,                                         // Required if DNS_PROTOCOL is set
-  PROFILE_NAME = "Stealth DNS/Proxy",
-  OUTPUT = "apps/loader/public/configs/stealth-dns.mobileconfig",
-} = process.env;
+const fs = require('fs');
+const dns = require('dns');
+const { v4: uuidv4 } = require('uuid');
 
-const payloadUUID = uuidv4().toUpperCase();
+const serverArg = process.env.DNS_SERVER || process.argv[2];
+const outFile = process.env.OUT || process.argv[3] || 'apps/loader/public/configs/stealth-dns.mobileconfig';
+const profileName = process.env.DNS_PROFILE_NAME || "Stealth DNS/Proxy";
+const protocol = process.env.DNS_PROTOCOL; // e.g., "https" for DoH
+const dohUrl = process.env.DOH_URL;        // e.g., "https://cloudflare-dns.com/dns-query"
 
-const dnsSettings = {
-  ServerAddresses: [DNS_SERVER],
-  SupplementalMatchDomains: ["."],
-  MatchDomainsNoSearch: true,
-};
-
-if (DNS_PROTOCOL && DOH_URL) {
-  dnsSettings.DNSProtocol = DNS_PROTOCOL;
-  dnsSettings.ServerURL = DOH_URL;
+if (!serverArg) {
+  console.error("❌ Please provide DNS_SERVER env or argument (IP or hostname)");
+  process.exit(1);
 }
 
-const profile = {
-  PayloadContent: [
-    {
-      PayloadDescription: "Configures DNS for stealth proxy/DoH on iOS.",
-      PayloadDisplayName: PROFILE_NAME,
-      PayloadIdentifier: `com.shadow.${payloadUUID}`,
-      PayloadType: "com.apple.dnsSettings.managed",
-      PayloadUUID: payloadUUID,
-      PayloadVersion: 1,
-      DNSSettings: dnsSettings,
-    },
-  ],
-  PayloadDisplayName: PROFILE_NAME,
-  PayloadIdentifier: `com.shadow.${payloadUUID}`,
-  PayloadRemovalDisallowed: false,
-  PayloadType: "Configuration",
-  PayloadUUID: payloadUUID,
-  PayloadVersion: 1,
-};
+// If comma separated, split to array
+let rawServers = serverArg.split(',').map(s => s.trim()).filter(Boolean);
 
-// Helper: write as Apple plist (minimal, manual XML)
-function toPlist(obj, indent = 0) {
-  const pad = (n) => "  ".repeat(n);
-  if (Array.isArray(obj)) {
-    return `<array>\n${obj.map(v => pad(indent + 1) + toPlist(v, indent + 1)).join('\n')}\n${pad(indent)}</array>`;
-  }
-  if (typeof obj === "object" && obj !== null) {
-    return `<dict>\n${Object.entries(obj)
-      .map(([k, v]) => `${pad(indent + 1)}<key>${k}</key>\n${pad(indent + 1)}${toPlist(v, indent + 1)}`)
-      .join('\n')}\n${pad(indent)}</dict>`;
-  }
-  if (typeof obj === "boolean") return `<${obj}/>`;
-  if (typeof obj === "number") return `<integer>${obj}</integer>`;
-  // Escape XML
-  return `<string>${String(obj).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</string>`;
+function resolveServers(servers) {
+  return Promise.all(
+    servers.map(server =>
+      /^\d+\.\d+\.\d+\.\d+$/.test(server)
+        ? Promise.resolve(server)
+        : new Promise((resolve, reject) =>
+            dns.resolve4(server, (err, addresses) => {
+              if (err || !addresses.length) reject(new Error(`Could not resolve ${server}`));
+              else resolve(addresses[0]); // take first IP
+            })
+          )
+    )
+  );
 }
 
-const xml =
-  `<?xml version="1.0" encoding="UTF-8"?>\n` +
-  `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n` +
-  `<plist version="1.0">\n` +
-  toPlist(profile, 0) +
-  `\n</plist>\n`;
+async function main() {
+  let addresses;
+  try {
+    addresses = await resolveServers(rawServers);
+  } catch (e) {
+    console.error(`❌ DNS resolution error:`, e.message);
+    process.exit(2);
+  }
 
-fs.mkdirSync(require("path").dirname(OUTPUT), { recursive: true });
-fs.writeFileSync(OUTPUT, xml);
+  // Validate all addresses
+  addresses.forEach(ip => {
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(ip)) {
+      console.error(`❌ Invalid IP: ${ip}`);
+      process.exit(3);
+    }
+  });
 
-console.log(`✅ Generated: ${OUTPUT}\n`);
+  const payloadUUID = uuidv4().toUpperCase();
+  const now = new Date().toISOString();
+  const DNSSettings = {
+    ServerAddresses: addresses
+  };
+  if (protocol && dohUrl) {
+    DNSSettings.DNSProtocol = protocol;
+    DNSSettings.ServerURL = dohUrl;
+  }
+
+  const mobileconfig = {
+    PayloadContent: [
+      {
+        PayloadDescription: "Configures DNS for stealth proxy/DoH on iOS.",
+        PayloadDisplayName: profileName,
+        PayloadIdentifier: `com.shadow.${payloadUUID}`,
+        PayloadType: "com.apple.dnsSettings.managed",
+        PayloadUUID: payloadUUID,
+        PayloadVersion: 1,
+        DNSSettings,
+      }
+    ],
+    PayloadDisplayName: profileName,
+    PayloadIdentifier: `com.shadow.${payloadUUID}`,
+    PayloadRemovalDisallowed: false,
+    PayloadType: "Configuration",
+    PayloadUUID: payloadUUID,
+    PayloadVersion: 1,
+    // Optionally:
+    // PayloadOrganization: "Shadow Scripts",
+    // PayloadDescription: `Generated ${now}`
+  };
+
+  // Write XML plist
+  const plist = require('plist');
+  const xml = plist.build(mobileconfig);
+
+  fs.mkdirSync(require('path').dirname(outFile), { recursive: true });
+  fs.writeFileSync(outFile, xml);
+  console.log(`✅ Mobileconfig written: ${outFile}`);
+  console.log(`Addresses: ${addresses.join(', ')}`);
+}
+
+main();
