@@ -26,6 +26,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
     outputs:
       sha_short: ${{ steps.sha.outputs.sha_short }}
 
@@ -97,16 +99,4 @@ jobs:
           path: "./apps/loader/public"
 
       - name: "🚀 Deploy to GitHub Pages"
-        id: deployment
         uses: actions/deploy-pages@v4
-        environment:
-          name: github-pages
-
-      - name: "📢 Send notification"
-        if: success() && env.DISCORD_WEBHOOK != ""
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: |
-          curl -H "Content-Type: application/json" -X POST \
-            -d "{\"content\": \"✅ Build v${BUILD_VERSION} deployed successfully\"}" \
-            "$DISCORD_WEBHOOK" || true
