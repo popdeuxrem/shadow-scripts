@@ -10,11 +10,11 @@
       <key>PayloadDisplayName</key>
       <string>Stealth DNS/Proxy</string>
       <key>PayloadIdentifier</key>
-      <string>com.shadow.5E77D894-381C-4987-A0E1-193F07E8B32E</string>
+      <string>com.shadow.ABFBBF04-A214-4B49-BFCD-2F7AE463FD31</string>
       <key>PayloadType</key>
       <string>com.apple.dnsSettings.managed</string>
       <key>PayloadUUID</key>
-      <string>5E77D894-381C-4987-A0E1-193F07E8B32E</string>
+      <string>ABFBBF04-A214-4B49-BFCD-2F7AE463FD31</string>
       <key>PayloadVersion</key>
       <integer>1</integer>
       <key>DNSSettings</key>
@@ -29,13 +29,13 @@
   <key>PayloadDisplayName</key>
   <string>Stealth DNS/Proxy</string>
   <key>PayloadIdentifier</key>
-  <string>com.shadow.5E77D894-381C-4987-A0E1-193F07E8B32E</string>
+  <string>com.shadow.ABFBBF04-A214-4B49-BFCD-2F7AE463FD31</string>
   <key>PayloadRemovalDisallowed</key>
   <false/>
   <key>PayloadType</key>
   <string>Configuration</string>
   <key>PayloadUUID</key>
-  <string>5E77D894-381C-4987-A0E1-193F07E8B32E</string>
+  <string>ABFBBF04-A214-4B49-BFCD-2F7AE463FD31</string>
   <key>PayloadVersion</key>
   <integer>1</integer>
 </dict>
