@@ -1,0 +1,73 @@
+name: 🔁 Full Stealth Loader: Obfuscate, Generate, Deploy, Notify
+
+on:
+  push:
+    paths:
+      - 'src-scripts/**/*.js'
+      - 'scripts/**/*.js'
+      - 'scripts/**/*.ts'
+      - 'scripts/**/*.sh'
+      - 'configs/master-rules.yaml'
+      - '.github/workflows/update-index.yml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repo
+        uses: actions/checkout@v4
+
+      - name: 🏗 Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.7.0
+
+      - name: 🛠️ Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 📦 Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: 🔨 Build everything (loader, obfuscation, configs, catalog)
+        run: |
+          chmod +x scripts/build-all.sh
+          ./scripts/build-all.sh
+
+      - name: 📝 Commit & Push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git add .
+          git diff --cached --quiet || git commit -m "🤖 Auto-update loader/configs [skip ci]"
+          git push
+
+      - name: 🚀 Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./apps/loader/public
+          publish_branch: gh-pages
+
+      - name: 💬 Discord notification
+        if: always()
+        run: |
+          curl -H "Content-Type: application/json" \
+               -X POST \
+               -d "{\"content\": \"✅ Loader and configs auto-updated and deployed to GitHub Pages.\"}" \
+               "$DISCORD_WEBHOOK"
