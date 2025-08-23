@@ -1,4 +1,4 @@
-name: 🔁 Full Stealth Loader: Obfuscate, Generate, Deploy, Notify
+name: '🔁 Full Stealth Loader: Obfuscate, Generate, Deploy, Notify'
 
 on:
   push:
