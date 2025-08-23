@@ -27,14 +27,11 @@ jobs:
         with:
           node-version: 18
 
-      - name: 📦 Install tooling
+      - name: 📦 Install global tooling
         run: |
           sudo apt-get update
           sudo apt-get install -y jq
-          npm install -g pnpm javascript-obfuscator
-
-      - name: ⬇️ Install dependencies (no lock required)
-        run: pnpm install
+          npm install -g javascript-obfuscator
 
       - name: 🔐 Obfuscate and Base64-encode all spoof scripts (recursive, monorepo)
         run: |
@@ -52,19 +49,18 @@ jobs:
           mkdir -p apps/loader/public/obfuscated
           mkdir -p apps/loader/public
 
-          # 1. Build the loader index.html
           cd apps/loader/public/obfuscated
           files=$(find . -name "*.js.b64" | sed 's|^\./||g' | jq -R . | jq -s .)
           files_raw=$(find . -name "*.js.b64" | sort | sed 's|^\./||g')
           cd ../..
 
-          # 2. Loader index.html
+          # Loader index.html
           sed "s|__SPOOF_TARGETS__|$files|" scripts/index-template.html > apps/loader/public/index.html
 
-          # 3. manifest.json
+          # manifest.json
           echo "$files" > apps/loader/public/manifest.json
 
-          # 4. catalog.html
+          # catalog.html
           list_html=""
           for file in $files_raw; do
             list_html="$list_html<li><span class=\"url\">$file</span></li>"
