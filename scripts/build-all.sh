@@ -17,7 +17,19 @@ echo "=== [2/6] Generate multi-platform configs ==="
 node scripts/gen-shadowrocket.js
 node scripts/gen-stash.js
 node scripts/gen-loon.js
-node scripts/gen-mobileconfig.js
+
+# --- Mobileconfig: Require DNS_SERVER as env or first arg ---
+if [[ -z "${DNS_SERVER:-}" && $# -lt 1 ]]; then
+  echo "❌ Please provide DNS_SERVER env or argument (IP address required, not hostname/domain)"
+  exit 1
+fi
+
+DNS_IP="${DNS_SERVER:-$1}"
+if [[ ! "$DNS_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "❌ DNS_SERVER must be a valid IP address (not a hostname): $DNS_IP"
+  exit 1
+fi
+DNS_SERVER="$DNS_IP" node scripts/gen-mobileconfig.js
 
 echo "=== [3/6] Obfuscate and Base64-encode scripts ==="
 find "$SRC_SCRIPTS" -type f -name "*.js" | while read src; do
@@ -38,5 +50,4 @@ echo "=== [6/6] Summary ==="
 ls -lh "$CONF_OUT"
 ls -lh "$OBF_OUT"
 echo "Catalog: $ROOT/apps/loader/public/catalog.html"
-
 echo "=== Build complete. Ready for deploy/CI. ==="
