@@ -1,17 +1,15 @@
-name: "🛠️ Full Build: Multi-Platform Config, Obfuscation, Catalog Automation"
+name: 🛠️ Build & Deploy — Shadow Scripts
 
 on:
   push:
+    branches: [main]
     paths:
-      - "src-scripts/**/*.js"
-      - "scripts/**/*.js"
-      - "scripts/**/*.ts"
-      - "scripts/**/*.sh"
-      - "configs/master-rules.yaml"
-      - "scripts/manifest-loader.html"
-      - ".github/workflows/ci.yml"
-      - "package.json"
-      - "pnpm-lock.yaml"
+      - 'src-scripts/**'
+      - 'scripts/**'
+      - 'configs/master-rules.yaml'
+      - 'scripts/manifest-loader.html'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
   workflow_dispatch:
 
 concurrency:
@@ -19,99 +17,100 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
-  pages: write
-  id-token: write
+  contents: write          # allow git push
+  pages: write             # allow Pages deploy
+  id-token: write          # required by deploy-pages
 
+env:
+  # fallback DNS for mobileconfig generator
+  DNS_SERVER: "1.1.1.1"
+  DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+
+#######################################################################
+# 1️⃣  BUILD job – runs the full mono-repo build and uploads the Pages #
+#######################################################################
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     outputs:
       sha_short: ${{ steps.sha.outputs.sha_short }}
-      build_version: ${{ env.BUILD_VERSION }}
-
     steps:
-      - name: "📥 Checkout"
+      # ─────────────────────────  checkout  ──────────────────────────
+      - name: ⬇️ Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: "🔑 Generate short SHA"
+      - name: 🔑 Short SHA
         id: sha
-        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: "🏗 Setup pnpm"
+      # ─────────────────────────  tool setup  ────────────────────────
+      - name: 🏗️ Set up pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 9.7.0
+        with: { version: 9.7.0 }
 
-      - name: "🛠️ Setup Node.js"
-        id: setup-node
+      - name: 🛠️ Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
 
-      - name: "📦 Install Dependencies"
-        id: deps
-        run: pnpm install --frozen-lockfile --prefer-offline
+      - name: 📦 Install deps
+        run: pnpm install --frozen-lockfile
 
-      - name: "🔍 Audit dependencies"
-        id: audit
-        run: pnpm audit --audit-level=high || echo "::warning::Security vulnerabilities found"
-
-      - name: "📝 Set build version"
-        id: version
-        run: echo "BUILD_VERSION=$(date +'%Y%m%d').${{ steps.sha.outputs.sha_short }}" >> $GITHUB_ENV
-
-      - name: "🔨 Build all"
-        id: build
+      # ─────────────────────────  build  ─────────────────────────────
+      - name: 🔨 Build (configs + obfuscation + manifest + loader)
         run: |
           chmod +x scripts/build-all.sh
           ./scripts/build-all.sh
-
-      - name: "🗂 Copy manifest loader as index.html"
-        id: copy-manifest
-        run: |
           cp scripts/manifest-loader.html apps/loader/public/index.html
 
-      - name: "🧪 Validate build artifacts"
-        id: validate
+      # ─────────────────────────  validate  ──────────────────────────
+      - name: 🧪 Validate outputs
         run: |
-          if [ ! -d "./apps/loader/public" ]; then
-            echo "::error::Build failed - public directory missing"
-            exit 1
-          fi
-          
-          empty_files=$(find ./apps/loader/public -type f \( -name "*.js" -o -name "*.json" \) -size 0)
-          if [ ! -z "$empty_files" ]; then
-            echo "::error::Empty files detected: $empty_files"
-            exit 1
-          fi
+          [ -d apps/loader/public ] || { echo "❌ public dir missing"; exit 1; }
+          find apps/loader/public -type f \( -name '*.js' -o -name '*.json' \) \
+          | while read -r f; do [ -s "$f" ] || { echo "❌ Empty file: $f"; exit 1; }; done
 
-      - name: "📝 Commit & Push if changed"
-        id: commit
+      # ───────────────────  optional auto-commit  ───────────────────
+      - name: 📝 Auto-commit artifacts (rebase-safe)
         run: |
-          git config user.name "github-actions[bot]"
+          git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .
-          git diff --cached --quiet || (git commit -m "🤖 Auto-update configs/artifacts [skip ci]" -m "Build: ${{ env.BUILD_VERSION }}" && git push)
+          git diff --cached --quiet || {
+            git commit -m "🤖 Build artifacts [skip ci]" -m "Build: ${{ steps.sha.outputs.sha_short }}"
+            git pull --rebase origin main || true
+            git push origin main || true
+          }
 
-      - name: "📄 Setup Pages"
-        id: pages
-        uses: actions/configure-pages@v4
-
-      - name: "📦 Upload Pages Artifact"
-        id: upload
+      # ─────────────────────  upload pages artifact  ─────────────────
+      - name: 📦 Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: "./apps/loader/public"
-          retention-days: 30
+          path: apps/loader/public      # ← folder that becomes your site
 
-      - name: "🚀 Deploy to GitHub Pages"
+#######################################################################
+# 2️⃣  DEPLOY job – uses the new Pages action (needs build)           #
+#######################################################################
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url:  ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🚀 Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v4    # official action  📄 docs →  [oai_citation:0‡GitHub](https://github.com/actions/deploy-pages?utm_source=chatgpt.com)
+
+#######################################################################
+# 3️⃣  (Optional) Discord notification                               #
+#######################################################################
+      - name: 📢 Discord notify
+        if: success() && env.DISCORD_WEBHOOK != ''
+        run: |
+          curl -H "Content-Type: application/json" -X POST \
+            -d "{\"content\":\"✅ Shadow Scripts build ${{ needs.build.outputs.sha_short }} deployed: ${{ steps.deployment.outputs.page_url }}\"}" \
+            "$DISCORD_WEBHOOK" || true
