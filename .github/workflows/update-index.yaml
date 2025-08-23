@@ -1,3 +1,5 @@
+name: 🔁 Full Stealth Loader: Obfuscate, Generate, Deploy, Notify
+
 on:
   push:
     paths:
@@ -10,8 +12,6 @@ on:
   schedule:
     - cron: "0 */6 * * *"
   workflow_dispatch:
-
-name: 🔁 Full Stealth Loader: Obfuscate, Generate, Deploy, Notify
 
 env:
   DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
