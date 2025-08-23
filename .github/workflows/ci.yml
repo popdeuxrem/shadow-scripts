@@ -53,25 +53,21 @@ jobs:
       - name: 📦 Install Dependencies
         run: pnpm install --frozen-lockfile
 
-      # Optional: security audit
       - name: 🔍 Audit dependencies
         run: pnpm audit --audit-level=high || echo "Security vulnerabilities found"
 
       - name: 📝 Set build version
         run: echo "BUILD_VERSION=$(date +'%Y%m%d').${{ steps.sha.outputs.sha_short }}" >> $GITHUB_ENV
 
-      # Build: configs, obfuscation, manifest, catalog, etc.
       - name: 🔨 Build all
         run: |
           chmod +x scripts/build-all.sh
           ./scripts/build-all.sh
 
-      # Copy manifest-based loader as index.html
       - name: 🗂 Copy manifest loader as index.html
         run: |
           cp scripts/manifest-loader.html apps/loader/public/index.html
 
-      # Validate outputs
       - name: 🧪 Validate build artifacts
         run: |
           if [ ! -d "./apps/loader/public" ]; then
@@ -85,7 +81,6 @@ jobs:
             fi
           '
 
-      # Auto-commit changes
       - name: 📝 Commit & Push if changed
         run: |
           git config user.name "github-actions[bot]"
@@ -93,7 +88,6 @@ jobs:
           git add .
           git diff --cached --quiet || (git commit -m "🤖 Auto-update configs/artifacts [skip ci]" -m "Build: ${{ steps.sha.outputs.sha_short }}" && git push)
 
-      # Configure GitHub Pages
       - name: 📄 Setup Pages
         uses: actions/configure-pages@v4
 
@@ -105,8 +99,9 @@ jobs:
       - name: 🚀 Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        environment:
+          name: github-pages
 
-      # Discord notification (optional)
       - name: 📢 Send notification
         if: success() && env.DISCORD_WEBHOOK != ''
         env:
