@@ -1,45 +1,74 @@
-name: 🛠 Full Build, Obfuscate, Generate Configs, Deploy
+name: 🛠️ Full Build: Multi-Platform Config, Obfuscation, Catalog Automation
 
 on:
   push:
     paths:
       - 'src-scripts/**/*.js'
-      - 'scripts/*.js'
+      - 'scripts/**/*.js'
+      - 'scripts/**/*.ts'
+      - 'scripts/**/*.sh'
       - 'configs/master-rules.yaml'
       - '.github/workflows/ci.yml'
-  schedule:
-    - cron: "0 */6 * * *"
+      - 'package.json'
+      - 'pnpm-lock.yaml'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🏗 Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.7.0
+
+      - name: 🛠️ Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
 
-      # Obfuscate, build loader/manifest/catalog here (insert your existing steps/scripts)
+      - name: 📦 Install Dependencies
+        run: pnpm install --frozen-lockfile
 
-      - run: node scripts/gen-shadowrocket.js
-      - run: node scripts/gen-stash.js
-      - run: node scripts/gen-loon.js
-      - run: node scripts/gen-mobileconfig.js
+      # --- Generate all configs/scripts per platform ---
+      - name: 🚦 Generate Shadowrocket Config
+        run: pnpm exec node scripts/gen-shadowrocket.js
 
-      # Manifest/catalog builder
-      - run: node scripts/gen-catalog.js
+      - name: 🚦 Generate Stash Config
+        run: pnpm exec node scripts/gen-stash.js
 
-      - name: 📤 Commit & Push if changed
+      - name: 🚦 Generate Loon Config
+        run: pnpm exec node scripts/gen-loon.js
+
+      - name: 🚦 Generate MobileConfig
+        run: pnpm exec node scripts/gen-mobileconfig.js
+
+      - name: 🚦 Generate Catalog
+        run: pnpm exec node scripts/gen-catalog.js
+
+      # --- Obfuscate and build ---
+      - name: 🔐 Obfuscate & Base64 Scripts
+        run: pnpm exec bash scripts/obfuscate-all.sh
+
+      # --- Auto-commit, push if changed ---
+      - name: 📝 Commit & Push if changed
         run: |
-          git config user.name "popdeuxrem"
-          git config user.email "174709939+popdeuxrem@users.noreply.github.com"
-          git add apps/loader/public/configs/*
-          git diff --cached --quiet || (git commit -m "🔁 Update all platform configs [skip ci]" && git push)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git add .
+          git diff --cached --quiet || git commit -m "🤖 Auto-update configs/artifacts [skip ci]"
+          git push
 
+      # --- Deploy to GitHub Pages ---
       - name: 🚀 Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
