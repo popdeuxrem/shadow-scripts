@@ -1,20 +1,64 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Spoof Script Catalog</title>
+  <meta charset="UTF-8" />
+  <title>Payload Catalog</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    body { font-family: sans-serif; margin: 2em; background: #f7f7f7; }
-    h1 { color: #222; }
-    ul { padding-left: 1.5em; }
-    li { font-family: monospace; margin-bottom: .5em; }
-    .url { color: #098; }
+    :root{color-scheme:dark}
+    body{margin:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;background:#000;color:#0f0;padding:20px}
+    h1{margin:0 0 12px;font-size:20px;color:#9f9}
+    #filter{width:260px;padding:6px 8px;margin-bottom:14px;background:#060;color:#dfd;border:1px solid #0a0;border-radius:6px}
+    table{width:100%;border-collapse:collapse;font-size:14px}
+    th,td{padding:6px 8px;text-align:left;border-bottom:1px solid #060}
+    a{color:#6cf;text-decoration:none}
+    .muted{color:#9c9;font-size:12px}
   </style>
 </head>
 <body>
-  <h1>Spoof Scripts Catalog</h1>
-  <ul>
-    __CATALOG_LIST__
-  </ul>
+  <h1>Obfuscated Payload Catalog</h1>
+  <input id="filter" type="text" placeholder="type to filter…">
+  <table id="tbl">
+    <thead><tr><th>Filename</th><th>Size</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <p class="muted">Data from <code>manifest.json</code> · click a file to download its base64 payload.</p>
+
+  <script>
+    const obfBase = new URL("obfuscated/", location.href).href;
+    const manifestURL = new URL("manifest.json", location.href).href;
+
+    const tbody = document.querySelector("#tbl tbody");
+    const filter = document.getElementById("filter");
+
+    fetch(manifestURL).then(r=>r.json()).then(list=>{
+      const rows=list.filter(f=>f.endsWith(".js.b64")).map(f=>{
+        const tr=document.createElement("tr");
+        const link=document.createElement("a");
+        link.href=obfBase+f; link.textContent=f;
+        const td1=document.createElement("td"); td1.appendChild(link);
+        const td2=document.createElement("td"); td2.textContent="…";
+        tr.append(td1,td2);
+        // fetch HEAD for size
+        fetch(obfBase+f,{method:"HEAD"}).then(r=>{
+          const len=r.headers.get("content-length");
+          if(len) td2.textContent=(len/1024).toFixed(1)+" KB";
+        });
+        return tr;
+      });
+      // initial render
+      rows.forEach(r=>tbody.appendChild(r));
+
+      // filter logic
+      filter.oninput=()=>{
+        const q=filter.value.toLowerCase();
+        rows.forEach(r=>{
+          const match=r.firstChild.textContent.toLowerCase().includes(q);
+          r.style.display=match?"":"none";
+        });
+      };
+    })
+    .catch(e=>tbody.innerHTML=`<tr><td colspan="2">Failed to load manifest: ${e}</td></tr>`);
+  </script>
 </body>
 </html>
