@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# scripts/build-all.sh
-# Orchestrates: configs → obfuscation → manifest/catalog → loader → validation
+# scripts/build-all.sh ─ master orchestrator
+# Steps: clean → configs → mobileconfig → obfuscate → manifest/loader → validate
+
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,119 +11,91 @@ CONF_DIR="apps/loader/public/configs"
 OBF_DIR="apps/loader/public/obfuscated"
 PUBLIC_DIR="apps/loader/public"
 SRC_JS="src-scripts"
-DNS_SERVER="${DNS_SERVER:-1.1.1.1}"
-PREFER_GROUP="${MOBILECONFIG_GROUP:-US}"
 
-die() { echo "❌ $*" >&2; exit 1; }
+DNS_SERVER="${DNS_SERVER:-1.1.1.1}"
+PREFER_GROUP="${MOBILECONFIG_GROUP:-Proxy}"
+
+die()  { printf '❌ %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-pick_obfuscator() {
-  if have npx; then echo "npx --yes javascript-obfuscator"; return; fi
+# ---------- obfuscator ----------
+pick_obf() {
+  if have npx;  then echo "npx --yes javascript-obfuscator"; return; fi
   if have pnpm; then echo "pnpm dlx javascript-obfuscator"; return; fi
-  die "javascript-obfuscator not available and no npx/pnpm found"
+  die "javascript-obfuscator not found"
 }
-OBF_CMD="$(pick_obfuscator)"
+OBF_CMD="$(pick_obf)"
 
-node_or_die() { have node || die "node not found"; }
-
+# ---------- helpers ----------
 ensure_dirs() {
   rm -rf "$CONF_DIR" "$OBF_DIR"
   mkdir -p "$CONF_DIR" "$OBF_DIR" "$PUBLIC_DIR"
 }
 
-run_if_exists() {
-  local f="$1"; shift || true
-  if [[ -f "$f" ]]; then node "$f" "$@"; else echo "↷ skip (missing): $f"; fi
-}
+node_if() { [[ -f "$1" ]] && node "$1"; }
 
-list_b64() {
-  # Print base64 filenames (one per line) or nothing if none
-  if compgen -G "$OBF_DIR/*.js.b64" >/dev/null; then
-    (cd "$OBF_DIR" && printf "%s\n" *.js.b64)
-  fi
-}
-
-write_manifest() {
-  echo "=== [4/8] Regenerate manifest.json ==="
+json_manifest() {
   if have jq; then
-    if compgen -G "$OBF_DIR/*.js.b64" >/dev/null; then
-      (cd "$OBF_DIR" && printf "%s\n" *.js.b64 | jq -R . | jq -s .) > "$PUBLIC_DIR/manifest.json"
-    else
-      echo "[]" > "$PUBLIC_DIR/manifest.json"
-    fi
+    (cd "$OBF_DIR" && printf '%s\n' *.js.b64 2>/dev/null | jq -R . | jq -s .)
   else
-    node - <<'NODE' "$OBF_DIR" "$PUBLIC_DIR/manifest.json"
+    node - <<'NODE' "$OBF_DIR"
 const fs=require('fs'),p=require('path');
-const dir=process.argv[2], out=process.argv[3];
-let files=[];
-try{ files=fs.readdirSync(dir).filter(f=>f.endsWith('.js.b64')).sort(); }catch{}
-fs.mkdirSync(p.dirname(out),{recursive:true});
-fs.writeFileSync(out, JSON.stringify(files,null,2)+"\n");
+const dir=process.argv[2];let a=[];
+try{a=fs.readdirSync(dir).filter(f=>f.endsWith('.js.b64')).sort();}catch{}
+console.log(JSON.stringify(a));
 NODE
   fi
 }
 
+# ---------- 1. clean ----------
 echo "=== [1/8] Clean outputs ==="
 ensure_dirs
 
-echo "=== [2/8] Generate platform configs ==="
+# ---------- 2. configs ----------
+echo "=== [2/8] Generate configs ==="
 export DNS_SERVER PREFER_GROUP
-node_or_die
-run_if_exists "scripts/gen-shadowrocket.js"
-run_if_exists "scripts/gen-stash.js"
-run_if_exists "scripts/gen-loon.js"
-run_if_exists "scripts/gen-mobileconfig.js"
+for f in gen-shadowrocket.js gen-stash.js gen-loon.js gen-mobileconfig.js; do
+  node_if "scripts/$f" || echo "↷ $f skipped"
+done
 
-echo "=== [3/8] Obfuscate + Base64 encode payloads ==="
-if [[ -d "$SRC_JS" ]] && compgen -G "$SRC_JS/*.js" >/dev/null; then
-  while IFS= read -r SRC; do
-    base="$(basename "$SRC" .js)"
-    obf="$OBF_DIR/$base.ob.js"
-    b64="$OBF_DIR/$base.js.b64"
-    $OBF_CMD "$SRC" \
-      --output "$obf" \
-      --compact true \
-      --self-defending true \
-      --control-flow-flattening true
-    base64 "$obf" > "$b64"
-    [[ -s "$b64" ]] || die "Empty payload after obfuscation: $b64"
-  done < <(find "$SRC_JS" -type f -name '*.js' | sort)
+# ---------- 3. obfuscate ----------
+echo "=== [3/8] Obfuscate scripts ==="
+if compgen -G "$SRC_JS/*.js" >/dev/null; then
+  find "$SRC_JS" -type f -name '*.js' | while read -r JS; do
+    base="$(basename "$JS" .js)"
+    "$OBF_CMD" "$JS" --output "$OBF_DIR/$base.ob.js" --compact true --self-defending true \
+      --control-flow-flattening true --dead-code-injection true
+    base64 "$OBF_DIR/$base.ob.js" > "$OBF_DIR/$base.js.b64"
+  done
 else
-  echo "↷ no src payloads found under $SRC_JS"
+  echo "↷ no JS payloads"
 fi
 
-write_manifest
+# ---------- 4. manifest ----------
+echo "=== [4/8] Build manifest.json ==="
+json_manifest > "$PUBLIC_DIR/manifest.json"
 
-echo "=== [5/8] Copy catalog.html ==="
-if [[ -f scripts/catalog-template.html ]]; then
-  cp scripts/catalog-template.html "$PUBLIC_DIR/catalog.html"
-else
-  echo "↷ skip (missing): scripts/catalog-template.html"
+# ---------- 5. loader / catalog ----------
+echo "=== [5/8] Loader & catalog ==="
+[[ -f scripts/manifest-loader.html ]] && cp scripts/manifest-loader.html "$PUBLIC_DIR/index.html"
+[[ -f scripts/catalog-template.html  ]] && cp scripts/catalog-template.html  "$PUBLIC_DIR/catalog.html"
+
+# ---------- 6. optional HTML minify ----------
+if have html-minifier && [[ -f "$PUBLIC_DIR/index.html" ]]; then
+  html-minifier --collapse-whitespace --remove-comments \
+    -o "$PUBLIC_DIR/index.html" "$PUBLIC_DIR/index.html"
 fi
 
-echo "=== [6/8] Copy manifest loader → index.html ==="
-if [[ -f scripts/manifest-loader.html ]]; then
-  cp scripts/manifest-loader.html "$PUBLIC_DIR/index.html"
-else
-  echo "↷ skip (missing): scripts/manifest-loader.html"
-fi
+# ---------- 7. validate ----------
+echo "=== [6/8] Validate ==="
+[[ -s "$PUBLIC_DIR/manifest.json" ]] || die "manifest.json missing/empty"
+find "$OBF_DIR" -type f -name '*.js.b64' -size 0 -print -quit | grep -q . && die "zero-byte b64"
 
-echo "=== [7/8] Validate build artifacts ==="
-[[ -f "$PUBLIC_DIR/manifest.json" ]] || die "manifest.json missing"
-[[ -s "$PUBLIC_DIR/manifest.json" ]] || die "manifest.json empty"
-# If any .js.b64 exist, ensure none are zero-length
-if compgen -G "$OBF_DIR/*.js.b64" >/dev/null; then
-  while IFS= read -r f; do
-    [[ -s "$f" ]] || die "Empty file detected: $f"
-  done < <(find "$OBF_DIR" -type f -name '*.js.b64')
-fi
-
-echo "=== [8/8] Summary ==="
-echo "Configs:"
-ls -1 "$CONF_DIR" 2>/dev/null || true
-count="$(list_b64 | wc -l || echo 0)"
-echo "Obfuscated payloads: $count"
-echo "Loader   : $PUBLIC_DIR/index.html"
-echo "Manifest : $PUBLIC_DIR/manifest.json"
-echo "Catalog  : $PUBLIC_DIR/catalog.html"
-echo "✅ Build complete."
+# ---------- 8. summary ----------
+echo "=== [7/8] Summary ==="
+echo "Configs   :" && ls -1 "$CONF_DIR"
+echo "Payloads  :" && ls -1 "$OBF_DIR" | wc -l
+echo "Manifest  : $PUBLIC_DIR/manifest.json"
+echo "Loader    : $PUBLIC_DIR/index.html"
+echo "Catalog   : $PUBLIC_DIR/catalog.html"
+echo "✅ Build complete"
