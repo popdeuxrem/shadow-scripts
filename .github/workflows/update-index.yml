@@ -63,7 +63,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20  # Using Node.js 20 for better stability
           cache: 'pnpm'
 
       # Generate cache key without using hashFiles function
@@ -88,8 +88,12 @@ jobs:
             stealth-
 
       - name: Install dependencies
-        if: ${{ steps.restore-build.outputs.cache-hit != 'true' || inputs.force_rebuild }}
-        run: pnpm install --frozen-lockfile --prod --prefer-offline
+        run: |
+          # Make sure we always install dependencies, as they might be needed even with cached build
+          pnpm install --frozen-lockfile
+          
+          # Install specific dependencies if not included in package.json
+          pnpm add -D js-yaml javascript-obfuscator
 
       - name: Build artifacts
         if: ${{ steps.restore-build.outputs.cache-hit != 'true' || inputs.force_rebuild }}
