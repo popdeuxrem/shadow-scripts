@@ -54,12 +54,6 @@ jobs:
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           echo "timestamp=$(date -u +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_OUTPUT
 
-      - name: Generate cache key
-        id: cache-key
-        run: |
-          HASH=$(find src-scripts scripts configs/master-rules.yaml -type f -not -path "*/node_modules/*" -not -path "*/dist/*" | sort | xargs cat | sha256sum | cut -d ' ' -f1)
-          echo "hash=$HASH" >> $GITHUB_OUTPUT
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -71,6 +65,17 @@ jobs:
         with:
           node-version: 22
           cache: 'pnpm'
+
+      # Generate cache key without using hashFiles function
+      - name: Generate cache key
+        id: cache-key
+        run: |
+          if [ -d "src-scripts" ] || [ -d "scripts" ] || [ -f "configs/master-rules.yaml" ]; then
+            HASH=$(find src-scripts scripts configs -type f -not -path "*/node_modules/*" -not -path "*/dist/*" 2>/dev/null | sort | xargs sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1)
+          else
+            HASH=$(date +%s)
+          fi
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
 
       - name: Restore build cache
         id: restore-build
@@ -94,6 +99,7 @@ jobs:
 
       - name: Add build metadata
         run: |
+          mkdir -p apps/loader/public
           echo "Build: ${{ steps.sha.outputs.sha_short }}" > apps/loader/public/version.txt
           echo "Date: ${{ steps.sha.outputs.timestamp }}" >> apps/loader/public/version.txt
           echo "Ref: ${{ github.ref_name }}" >> apps/loader/public/version.txt
@@ -101,9 +107,16 @@ jobs:
       - name: Validate artifacts
         run: |
           [ -d apps/loader/public ] || { echo "❌ public directory missing"; exit 1; }
-          find apps/loader/public -type f \( -name '*.js' -o -name '*.json' \) -empty | grep -q . && { 
-            echo "❌ Empty artifact(s) detected"; exit 1; 
-          } || echo "✅ All artifacts validated"
+          
+          # Check if any empty JS or JSON files exist, but handle case when none are found
+          EMPTY_FILES=$(find apps/loader/public -type f \( -name '*.js' -o -name '*.json' \) -empty 2>/dev/null || echo "")
+          if [ -n "$EMPTY_FILES" ]; then
+            echo "❌ Empty artifact(s) detected:"
+            echo "$EMPTY_FILES"
+            exit 1
+          else
+            echo "✅ All artifacts validated"
+          fi
 
       - name: Commit & push changes
         if: ${{ steps.restore-build.outputs.cache-hit != 'true' || inputs.force_rebuild }}
@@ -116,6 +129,8 @@ jobs:
             git commit -m "🤖 Auto-update artifacts [skip ci]" -m "build:${{ steps.sha.outputs.sha_short }}"
             git pull --rebase
             git push || echo "Push failed, continuing with deployment"
+          else
+            echo "No changes to commit"
           fi
 
       - name: Upload Pages artifact
