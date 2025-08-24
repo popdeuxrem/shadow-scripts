@@ -1,17 +1,17 @@
-name: 🔁 Full Stealth Loader — Obfuscate · Generate · Deploy · Notify
+name: "🔁 Full Stealth Loader · Obfuscate → Generate → Deploy → Notify"
 
 on:
   push:
     paths:
-      - 'src-scripts/**'
-      - 'scripts/**'
-      - 'configs/master-rules.yaml'
-      - 'scripts/manifest-loader.html'
-      - '.github/workflows/update-index.yml'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
+      - "src-scripts/**"
+      - "scripts/**"
+      - "configs/master-rules.yaml"
+      - "scripts/manifest-loader.html"
+      - ".github/workflows/update-index.yml"
+      - "package.json"
+      - "pnpm-lock.yaml"
   schedule:
-    - cron: '0 */6 * * *'   # every 6 hours
+    - cron: "0 */6 * * *"   # every-6-hours
   workflow_dispatch:
 
 concurrency:
@@ -19,87 +19,96 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write      # allow auto-commit
-  pages: write         # allow deploy-pages
-  id-token: write      # required by deploy-pages
+  contents: write      # auto-commit
+  pages:    write      # deploy-pages
+  id-token: write      # deploy-pages
 
-env:
-  DNS_SERVER: "1.1.1.1"
+env:                    # available to *all* jobs
+  DNS_SERVER:     "1.1.1.1"
   DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
 
 jobs:
+# ────────────────────────────────────────────────────────────────
+#  build ➜ produces apps/loader/public/**  and uploads Pages-artifact
+# ────────────────────────────────────────────────────────────────
   build:
     runs-on: ubuntu-latest
     outputs:
       sha_short: ${{ steps.sha.outputs.sha_short }}
 
     steps:
-      # ─────────────────── checkout & version ────────────────────
+      # ───────── checkout & short-SHA ─────────
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
       - id: sha
         run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      # ─────────────────── toolchain ─────────────────────────────
+      # ───────── toolchain ─────────
       - uses: pnpm/action-setup@v4
         with: { version: 9.7.0 }
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
+          cache: "pnpm"
 
       - run: pnpm install --frozen-lockfile
 
-      # ─────────────────── build & copy loader ───────────────────
-      - name: 🔨 Build all (configs · obfuscation · manifest)
+      # ───────── build pipeline ─────────
+      - name: 🔨 Build (configs · obfuscation · manifest)
         run: |
           chmod +x scripts/build-all.sh
           ./scripts/build-all.sh
-          cp scripts/manifest-loader.html apps/loader/public/index.html
 
-      # ─────────────────── validate artifacts ────────────────────
-      - name: 🧪 Validate outputs
+      # ───────── validate artefacts ─────────
+      - name: 🧪 Validate artefacts
         run: |
           [ -d apps/loader/public ] || { echo "❌ public dir missing"; exit 1; }
-          find apps/loader/public -type f \( -name '*.js' -o -name '*.json' \) |
-          while read -r f; do [ -s "$f" ] || { echo "❌ Empty file: $f"; exit 1; }; done
+          find apps/loader/public -type f \( -name '*.js' -o -name '*.json' \) -empty -print -quit | \
+            grep -q . && { echo "❌ empty artefact(s)"; exit 1; } || true
 
-      # ─────────────────── auto-commit (rebase-safe) ─────────────
-      - name: 📝 Commit & Push if changed
+      # ───────── auto-commit (rebase-safe) ─────────
+      - name: 📝 Commit & push changes
+        env:
+          SHA: ${{ steps.sha.outputs.sha_short }}
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .
-          git diff --cached --quiet || {
-            git commit -m "🤖 Auto-update loader/configs [skip ci]" \
-                         -m "Build: ${{ steps.sha.outputs.sha_short }}"
-            git pull --rebase origin main || true
-            git push origin main || true
-          }
 
-      # ─────────────────── upload artifact for Pages ─────────────
+          git add -A
+          if ! git diff --cached --quiet; then
+            git fetch origin main
+            git rebase origin/main
+            git commit -m "🤖 Auto-update artefacts [skip ci]" -m "base:$SHA"
+            git push --force-with-lease
+          fi
+
+      # ───────── upload Pages artefact ─────────
       - uses: actions/upload-pages-artifact@v3
         with: { path: apps/loader/public }
 
+# ────────────────────────────────────────────────────────────────
+#  deploy  ➜  publishes Pages artefact + Discord notification
+# ────────────────────────────────────────────────────────────────
   deploy:
     needs: build
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     runs-on: ubuntu-latest
     permissions:
       pages: write
       id-token: write
+
     steps:
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v4   # publishes artifact uploaded above
 
-      # ─────────────────── discord notify (success only) ─────────
       - name: 📢 Discord notify
         if: success() && env.DISCORD_WEBHOOK != ''
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          PAGE_URL:        ${{ steps.deploy.outputs.page_url }}
+          SHA:             ${{ needs.build.outputs.sha_short }}
         run: |
-          curl -H "Content-Type: application/json" -X POST \
-               -d "{\"content\":\"✅ Stealth Loader build ${{ needs.build.outputs.sha_short }} deployed: ${{ steps.deploy.outputs.page_url }}\"}" \
+          curl -s -H "Content-Type: application/json" -X POST \
+               -d "{\"content\":\"✅ Stealth-Loader $SHA deployed → $PAGE_URL\"}" \
                "$DISCORD_WEBHOOK" || true
