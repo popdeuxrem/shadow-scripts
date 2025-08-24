@@ -33,7 +33,6 @@ env:
   DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
   NODE_ENV: production
   PNPM_CACHE_FOLDER: .pnpm-store
-  BUILD_CACHE_KEY: stealth-${{ hashFiles('src-scripts/**/*.js', 'scripts/**/*.js', 'configs/master-rules.yaml') }}
 
 jobs:
   build:
@@ -55,6 +54,12 @@ jobs:
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           echo "timestamp=$(date -u +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_OUTPUT
 
+      - name: Generate cache key
+        id: cache-key
+        run: |
+          HASH=$(find src-scripts scripts configs/master-rules.yaml -type f -not -path "*/node_modules/*" -not -path "*/dist/*" | sort | xargs cat | sha256sum | cut -d ' ' -f1)
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -73,9 +78,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: apps/loader/public
-          key: ${{ env.BUILD_CACHE_KEY }}-${{ github.ref_name }}
+          key: stealth-${{ steps.cache-key.outputs.hash }}
           restore-keys: |
-            ${{ env.BUILD_CACHE_KEY }}-
+            stealth-
 
       - name: Install dependencies
         if: ${{ steps.restore-build.outputs.cache-hit != 'true' || inputs.force_rebuild }}
