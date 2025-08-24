@@ -1,100 +1,125 @@
 #!/usr/bin/env node
 /**
- * Build Shadowrocket config  
- * master-rules.yaml  ➞  apps/loader/public/configs/shadowrocket.conf
+ * Build Shadowrocket .conf from configs/master-rules.yaml
  *
- *  • supports full `general` block (bypass-system, skip-proxy, bypass-tun …)
- *  • converts every proxy entry, proxy-group, rule, external rule-set
- *  • appends MITM and Script sections when present
+ * Output: apps/loader/public/configs/shadowrocket.conf
+ * Needs : node, js-yaml
+ *
+ * Env:
+ *   DNS_SERVER        (default 1.1.1.1)
+ *   MASTER_RULES      (override master-rules path)
+ *   SHADOW_GROUP_NAME (default Proxy)
  */
+
 const fs   = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 
 const ROOT   = path.resolve(__dirname, '..');
-const YAML   = path.join(ROOT, 'configs/master-rules.yaml');
+const IN_YAML= process.env.MASTER_RULES || path.join(ROOT, 'configs/master-rules.yaml');
 const OUTDIR = path.join(ROOT, 'apps/loader/public/configs');
 const OUT    = path.join(OUTDIR, 'shadowrocket.conf');
 
-/* ── helpers ──────────────────────────────────────────────────────────────── */
-const j = a => a.filter(Boolean).join(', ');          // join + drop blanks
-const yes = v => v === true || v === 'true';
+const DNS    = process.env.DNS_SERVER || '1.1.1.1';
+const GROUP  = process.env.SHADOW_GROUP_NAME || 'Proxy';
 
-/* ── build sections ──────────────────────────────────────────────────────── */
-function sectionGeneral(g = {}) {
-  const out = ['[General]'];
-  if (yes(g.bypass_system))     out.push('bypass-system = true');
-  if (g.skip_proxy?.length)     out.push(`skip-proxy = ${j(g.skip_proxy)}`);
-  if (g.bypass_tun?.length)     out.push(`bypass-tun = ${j(g.bypass_tun)}`);
-  if (g.dns)                    out.push(`dns-server = ${g.dns}`);
-  if (g.ipv6 === false)         out.push('ipv6 = false');
-  if (yes(g.udp_relay))         out.push('udp-relay = true');
-  out.push('');
-  return out.join('\n');
-}
+/* ---------- helpers ---------- */
+const readYaml = fp => yaml.load(fs.readFileSync(fp, 'utf8'));
+const join     = arr => arr.filter(Boolean).join(', ');
 
-function sectionProxy(doc) {
-  const out = ['[Proxy]'];
-  for (const region of Object.keys(doc.proxies || {})) {
-    for (const p of doc.proxies[region]) {
-      const flags = Object.entries(p)
-        .filter(([k]) => !['type','name','host','port','user','pass'].includes(k))
-        .map(([k,v]) => `${k}=${v}`);
-      out.push(
-        `${p.name} = ${j([
-          p.type, p.host, p.port, p.user, p.pass, ...flags
-        ])}`
-      );
-    }
+function shadowProxy(p) {
+  const common = [p.type, p.host, p.port, p.user, p.pass].filter(Boolean);
+
+  /* flags */
+  const flags = [];
+  if (p.tls)  flags.push('tls=true');
+  if (p['fast_open']) flags.push('fast-open=false');          // SR syntax
+  if (p.ws) {
+    flags.push('ws=true');
+    flags.push(`ws-path=${p.ws_path || '/'}`);
   }
-  out.push('');
-  return out.join('\n');
+  if (p.servername) flags.push(`tls-host=${p.servername}`);
+
+  return `${p.name} = ${join([...common, ...flags])}`;
 }
 
-function sectionGroups(doc) {
-  const out = ['[Proxy Group]'];
-  for (const g of Object.keys(doc.groups || {}))
-    out.push(`${g} = select,${j(doc.groups[g])}`);
-  out.push('');
-  return out.join('\n');
+function buildProxySection(proxiesObj) {
+  const lines = [];
+  Object.values(proxiesObj || {}).forEach(list =>
+    list.forEach(p => lines.push(shadowProxy(p))));
+  return lines;
 }
 
-function ruleLine(r) {
-  if (typeof r === 'string') return r;          // raw string passthrough
-  return `${r.type},${r.value},${r.group}`;
+function buildGroupSection(groups) {
+  return Object.entries(groups || {})
+    .map(([name, list]) => `${name} = select, ${join([...list, 'DIRECT'])}`);
 }
 
-function sectionRules(doc) {
-  const out = ['[Rule]'];
-  (doc.rules || []).forEach(r => out.push(ruleLine(r)));
-  (doc.external_rule_sets || [])
-    .forEach(e => out.push(`RULE-SET,${e.url},${e.group}`));
-  (doc.block_domains || [])
-    .forEach(d => out.push(`DOMAIN-SUFFIX,${d},REJECT`));
-  out.push('FINAL,Proxy', '');                  // default fallback
-  return out.join('\n');
+function ruleToLine(r) {
+  const type = r.type?.toUpperCase();
+  const v    = r.value;
+  const g    = r.group || GROUP;
+  switch (type) {
+    case 'DOMAIN':
+    case 'DOMAIN-SUFFIX':
+    case 'DOMAIN-KEYWORD':
+    case 'GEOIP':
+    case 'IP-CIDR':
+    case 'SRC-IP-CIDR':
+    case 'URL-REGEX':
+    case 'DST-PORT':
+      return `${type},${v},${g}`;
+    default:
+      return null;
+  }
 }
 
-const sectionMitm   = d => d.mitm_hostnames?.length
-  ? `[MITM]\nhostname = ${j(d.mitm_hostnames)}\n`
-  : '';
+/* ---------- main ---------- */
+const doc = readYaml(IN_YAML);
 
-const sectionScript = d => d.scripts?.loader_url
-  ? `[Script]\nhttp-response ^https?:\/\/.+ script-response-body ${d.scripts.loader_url}\n`
-  : '';
+/* [General] */
+const general = [
+  '[General]',
+  `dns-server = ${DNS}`,
+  'ipv6 = false',
+  'udp-relay = true',
+  'bypass-system = true',
+  'skip-proxy = 192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12, localhost, *.local',
+  ''
+];
 
-/* ── main ─────────────────────────────────────────────────────────────────── */
-const doc = yaml.load(fs.readFileSync(YAML, 'utf8')) || {};
+/* [Proxy] */
+const proxySec = ['[Proxy]', ...buildProxySection(doc.proxies)].concat('');
+/* [Proxy Group] */
+const groupSec = ['[Proxy Group]', ...buildGroupSection(doc.groups)].concat('');
 
-const config = [
-  sectionGeneral(doc.general || {}),
-  sectionProxy(doc),
-  sectionGroups(doc),
-  sectionRules(doc),
-  sectionMitm(doc),
-  sectionScript(doc)
-].filter(Boolean).join('\n');
+/* [Rule] */
+const ruleLines = (doc.rules || []).map(ruleToLine).filter(Boolean);
+const ersLines  = (doc.external_rule_sets || []).map(e => `RULE-SET,${e.url},${e.group}`);
+const blockLines= (doc.block_domains || []).map(d => `DOMAIN-SUFFIX,${d},REJECT`);
+const ruleSec   = ['[Rule]', ...ruleLines, ...ersLines, ...blockLines, `FINAL,${GROUP}`, ''];
+
+/* [Script] */
+const scriptSec = doc.scripts?.loader_url
+  ? ['[Script]', `MITM-LOADER = type=http-response,pattern=https?:\\/\\/.+,script-path=${doc.scripts.loader_url}`, '']
+  : [];
+
+/* [MITM] */
+let mitmSec = [];
+if (doc.mitm_hostnames?.length) {
+  mitmSec = ['[MITM]', `enable = true`, `hostname = ${doc.mitm_hostnames.join(',')}`, ''];
+}
+
+/* ---------- write ---------- */
+const finalConf = [
+  ...general,
+  ...proxySec,
+  ...groupSec,
+  ...ruleSec,
+  ...scriptSec,
+  ...mitmSec
+].join('\n');
 
 fs.mkdirSync(OUTDIR, { recursive: true });
-fs.writeFileSync(OUT, config);
+fs.writeFileSync(OUT, finalConf);
 console.log('✓ shadowrocket.conf →', path.relative(ROOT, OUT));
