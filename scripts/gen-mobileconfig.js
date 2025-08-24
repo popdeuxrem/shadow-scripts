@@ -1,96 +1,96 @@
 #!/usr/bin/env node
+/**
+ * Generate shadowrocket.mobileconfig from master-rules.yaml
+ * iOS users can install directly to apply routing + MITM.
+ */
 
-const fs = require('fs');
-const dns = require('dns');
-const { v4: uuidv4 } = require('uuid');
+import fs from 'fs';
+import path from 'path';
+import yaml from 'js-yaml';
+import plist from 'plist';
 
-const serverArg = process.env.DNS_SERVER || process.argv[2];
-const outFile = process.env.OUT || process.argv[3] || 'apps/loader/public/configs/stealth-dns.mobileconfig';
-const profileName = process.env.DNS_PROFILE_NAME || "Stealth DNS/Proxy";
-const protocol = process.env.DNS_PROTOCOL; // e.g., "https" for DoH
-const dohUrl = process.env.DOH_URL;        // e.g., "https://cloudflare-dns.com/dns-query"
+const root    = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const src     = path.join(root, 'configs', 'master-rules.yaml');
+const outDir  = path.join(root, 'apps', 'loader', 'public', 'configs');
+const out     = path.join(outDir, 'shadowrocket.mobileconfig');
 
-if (!serverArg) {
-  console.error("❌ Please provide DNS_SERVER env or argument (IP or hostname)");
-  process.exit(1);
-}
+const yml = yaml.load(fs.readFileSync(src, 'utf8'));
 
-// If comma separated, split to array
-let rawServers = serverArg.split(',').map(s => s.trim()).filter(Boolean);
+const PROFILE_ID = 'com.popdeuxrem.shadowrocket';
+const ORGANIZATION = 'PopDeuxRem Scripts';
+const DISPLAY_NAME = 'Shadowrocket Auto Config';
+const DESCRIPTION = 'Auto-install proxy config with MITM, DNS, routing rules.';
+const UUID = () => crypto.randomUUID();
 
-function resolveServers(servers) {
-  return Promise.all(
-    servers.map(server =>
-      /^\d+\.\d+\.\d+\.\d+$/.test(server)
-        ? Promise.resolve(server)
-        : new Promise((resolve, reject) =>
-            dns.resolve4(server, (err, addresses) => {
-              if (err || !addresses.length) reject(new Error(`Could not resolve ${server}`));
-              else resolve(addresses[0]); // take first IP
-            })
-          )
-    )
-  );
-}
-
-async function main() {
-  let addresses;
-  try {
-    addresses = await resolveServers(rawServers);
-  } catch (e) {
-    console.error(`❌ DNS resolution error:`, e.message);
-    process.exit(2);
-  }
-
-  // Validate all addresses
-  addresses.forEach(ip => {
-    if (!/^\d+\.\d+\.\d+\.\d+$/.test(ip)) {
-      console.error(`❌ Invalid IP: ${ip}`);
-      process.exit(3);
-    }
-  });
-
-  const payloadUUID = uuidv4().toUpperCase();
-  const now = new Date().toISOString();
-  const DNSSettings = {
-    ServerAddresses: addresses
-  };
-  if (protocol && dohUrl) {
-    DNSSettings.DNSProtocol = protocol;
-    DNSSettings.ServerURL = dohUrl;
-  }
-
-  const mobileconfig = {
-    PayloadContent: [
-      {
-        PayloadDescription: "Configures DNS for stealth proxy/DoH on iOS.",
-        PayloadDisplayName: profileName,
-        PayloadIdentifier: `com.shadow.${payloadUUID}`,
-        PayloadType: "com.apple.dnsSettings.managed",
-        PayloadUUID: payloadUUID,
-        PayloadVersion: 1,
-        DNSSettings,
-      }
-    ],
-    PayloadDisplayName: profileName,
-    PayloadIdentifier: `com.shadow.${payloadUUID}`,
-    PayloadRemovalDisallowed: false,
-    PayloadType: "Configuration",
-    PayloadUUID: payloadUUID,
+/**
+ * Build the Shadowrocket payload using plist format
+ */
+const payload = {
+  PayloadContent: [{
+    PayloadType: 'com.shadowrocket.config',
     PayloadVersion: 1,
-    // Optionally:
-    // PayloadOrganization: "Shadow Scripts",
-    // PayloadDescription: `Generated ${now}`
-  };
+    PayloadIdentifier: `${PROFILE_ID}.config`,
+    PayloadUUID: UUID(),
+    PayloadEnabled: true,
+    PayloadDisplayName: DISPLAY_NAME,
+    PayloadDescription: DESCRIPTION,
 
-  // Write XML plist
-  const plist = require('plist');
-  const xml = plist.build(mobileconfig);
+    dns: yml.dns || '1.1.1.1',
 
-  fs.mkdirSync(require('path').dirname(outFile), { recursive: true });
-  fs.writeFileSync(outFile, xml);
-  console.log(`✅ Mobileconfig written: ${outFile}`);
-  console.log(`Addresses: ${addresses.join(', ')}`);
-}
+    proxies: Object.values(yml.proxies || {}).flat().map(p => {
+      const obj = {
+        type: p.type,
+        name: p.name,
+        host: p.host,
+        port: p.port,
+      };
+      if (p.user)        obj.user = p.user;
+      if (p.pass)        obj.pass = p.pass;
+      if (p.tls)         obj.tls = true;
+      if (p.ws)          obj.ws = true;
+      if (p.ws_path)     obj['ws-path'] = p.ws_path;
+      if (p.servername)  obj.servername = p.servername;
+      return obj;
+    }),
 
-main();
+    'proxy-groups': Object.entries(yml.groups || {}).map(([name, proxies]) => ({
+      name,
+      type: 'select',
+      proxies
+    })),
+
+    rules: [
+      ...(yml.rules || []).map(r =>
+        typeof r === 'string' ? r : `${r.type},${r.value},${r.group}`),
+      ...(yml.external_rule_sets || []).map(x =>
+        `RULE-SET,${x.url},${x.group}`),
+      ...(yml.block_domains || []).map(d =>
+        `DOMAIN-SUFFIX,${d},REJECT`),
+      'FINAL,US'
+    ],
+
+    mitm: {
+      enabled: true,
+      hostnames: yml.mitm_hostnames || []
+    },
+
+    script: yml.scripts?.loader_url
+      ? {
+          http_response: `^https?:\\/\\/.+`,
+          script_path: yml.scripts.loader_url
+        }
+      : undefined
+  }],
+
+  PayloadType: 'Configuration',
+  PayloadVersion: 1,
+  PayloadIdentifier: PROFILE_ID,
+  PayloadUUID: UUID(),
+  PayloadDisplayName: DISPLAY_NAME,
+  PayloadDescription: DESCRIPTION,
+  PayloadOrganization: ORGANIZATION
+};
+
+fs.mkdirSync(outDir, { recursive: true });
+fs.writeFileSync(out, plist.build(payload));
+console.log('✅  Generated', out);
