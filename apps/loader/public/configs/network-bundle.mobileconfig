@@ -9,7 +9,7 @@
     <key>PayloadIdentifier</key>
     <string>shadow-scripts.network-bundle</string>
     <key>PayloadUUID</key>
-    <string>77b6296a-9078-476f-93cf-8d19226687c6</string>
+    <string>59380482-68a5-413d-aa4e-550c269bc575</string>
     <key>PayloadDisplayName</key>
     <string>Network Bundle (DNS + HTTP Proxy)</string>
     <key>PayloadOrganization</key>
@@ -24,9 +24,9 @@
         <key>PayloadVersion</key>
         <integer>1</integer>
         <key>PayloadIdentifier</key>
-        <string>shadow-scripts.dns.3bbd9d1f-8e57-4b41-b913-a555ae5436ed</string>
+        <string>shadow-scripts.dns.a435996c-9acf-4a12-8e90-40fb1bf1bc33</string>
         <key>PayloadUUID</key>
-        <string>4f0c2190-bc42-4102-8ab2-a1e3fb01c65f</string>
+        <string>57937ddd-212e-459d-858b-6c6f181746c8</string>
         <key>PayloadDisplayName</key>
         <string>DNS Settings</string>
         <key>DNSSettings</key>
@@ -43,9 +43,9 @@
         <key>PayloadVersion</key>
         <integer>1</integer>
         <key>PayloadIdentifier</key>
-        <string>shadow-scripts.proxy.http.d7f3e748-6e07-4b59-8ad0-9d6a85ae44fa</string>
+        <string>shadow-scripts.proxy.http.de1140ce-ebbf-4d8f-a99f-26ec828a84d8</string>
         <key>PayloadUUID</key>
-        <string>83758ba5-0374-42bf-b727-77c21557948d</string>
+        <string>8c4b9ceb-66e3-4157-8887-6defb0b11e97</string>
         <key>PayloadDisplayName</key>
         <string>HTTP Proxy (HTTP-US1)</string>
         <key>ProxyServer</key>

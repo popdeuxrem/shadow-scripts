@@ -9,7 +9,7 @@
     <key>PayloadIdentifier</key>
     <string>shadow-scripts.stealth-dns</string>
     <key>PayloadUUID</key>
-    <string>728dffa8-4075-489b-84d6-51b1f21209ae</string>
+    <string>c78dea72-3ba3-406a-92b2-b8a552744cd7</string>
     <key>PayloadDisplayName</key>
     <string>Stealth DNS</string>
     <key>PayloadOrganization</key>
@@ -24,9 +24,9 @@
         <key>PayloadVersion</key>
         <integer>1</integer>
         <key>PayloadIdentifier</key>
-        <string>shadow-scripts.dns.3bbd9d1f-8e57-4b41-b913-a555ae5436ed</string>
+        <string>shadow-scripts.dns.a435996c-9acf-4a12-8e90-40fb1bf1bc33</string>
         <key>PayloadUUID</key>
-        <string>4f0c2190-bc42-4102-8ab2-a1e3fb01c65f</string>
+        <string>57937ddd-212e-459d-858b-6c6f181746c8</string>
         <key>PayloadDisplayName</key>
         <string>DNS Settings</string>
         <key>DNSSettings</key>
