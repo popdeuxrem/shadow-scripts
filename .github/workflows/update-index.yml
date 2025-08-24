@@ -11,104 +11,132 @@ on:
       - "package.json"
       - "pnpm-lock.yaml"
   schedule:
-    - cron: "0 */6 * * *"   # every-6-hours
+    - cron: "0 0 * * 0"   # Weekly on Sunday at midnight (reduced frequency)
   workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Skip cache and force rebuild'
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  contents: write      # auto-commit
-  pages:    write      # deploy-pages
-  id-token: write      # deploy-pages
+  contents: write
+  pages: write
+  id-token: write
 
-env:                    # available to *all* jobs
-  DNS_SERVER:     "1.1.1.1"
+env:
+  DNS_SERVER: "1.1.1.1"
   DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+  NODE_ENV: production
+  PNPM_CACHE_FOLDER: .pnpm-store
+  BUILD_CACHE_KEY: stealth-${{ hashFiles('src-scripts/**/*.js', 'scripts/**/*.js', 'configs/master-rules.yaml') }}
 
 jobs:
-# ────────────────────────────────────────────────────────────────
-#  build ➜ produces apps/loader/public/**  and uploads Pages-artifact
-# ────────────────────────────────────────────────────────────────
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       sha_short: ${{ steps.sha.outputs.sha_short }}
+      cache_hit: ${{ steps.restore-build.outputs.cache-hit }}
 
     steps:
-      # ───────── checkout & short-SHA ─────────
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
-      - id: sha
-        run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Generate build metadata
+        id: sha
+        run: |
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "timestamp=$(date -u +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_OUTPUT
 
-      # ───────── toolchain ─────────
-      - uses: pnpm/action-setup@v4
-        with: { version: 9.7.0 }
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.7.0
+          run_install: false
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: "pnpm"
+          cache: 'pnpm'
 
-      - run: pnpm install --frozen-lockfile
+      - name: Restore build cache
+        id: restore-build
+        if: ${{ !inputs.force_rebuild }}
+        uses: actions/cache@v4
+        with:
+          path: apps/loader/public
+          key: ${{ env.BUILD_CACHE_KEY }}-${{ github.ref_name }}
+          restore-keys: |
+            ${{ env.BUILD_CACHE_KEY }}-
 
-      # ───────── build pipeline ─────────
-      - name: 🔨 Build (configs · obfuscation · manifest)
+      - name: Install dependencies
+        if: ${{ steps.restore-build.outputs.cache-hit != 'true' || inputs.force_rebuild }}
+        run: pnpm install --frozen-lockfile --prod --prefer-offline
+
+      - name: Build artifacts
+        if: ${{ steps.restore-build.outputs.cache-hit != 'true' || inputs.force_rebuild }}
         run: |
           chmod +x scripts/build-all.sh
           ./scripts/build-all.sh
 
-      # ───────── validate artefacts ─────────
-      - name: 🧪 Validate artefacts
+      - name: Add build metadata
         run: |
-          [ -d apps/loader/public ] || { echo "❌ public dir missing"; exit 1; }
-          find apps/loader/public -type f \( -name '*.js' -o -name '*.json' \) -empty -print -quit | \
-            grep -q . && { echo "❌ empty artefact(s)"; exit 1; } || true
+          echo "Build: ${{ steps.sha.outputs.sha_short }}" > apps/loader/public/version.txt
+          echo "Date: ${{ steps.sha.outputs.timestamp }}" >> apps/loader/public/version.txt
+          echo "Ref: ${{ github.ref_name }}" >> apps/loader/public/version.txt
 
-      # ───────── auto-commit (rebase-safe) ─────────
-      - name: 📝 Commit & push changes
-        env:
-          SHA: ${{ steps.sha.outputs.sha_short }}
+      - name: Validate artifacts
         run: |
-          git config user.name  "github-actions[bot]"
+          [ -d apps/loader/public ] || { echo "❌ public directory missing"; exit 1; }
+          find apps/loader/public -type f \( -name '*.js' -o -name '*.json' \) -empty | grep -q . && { 
+            echo "❌ Empty artifact(s) detected"; exit 1; 
+          } || echo "✅ All artifacts validated"
+
+      - name: Commit & push changes
+        if: ${{ steps.restore-build.outputs.cache-hit != 'true' || inputs.force_rebuild }}
+        run: |
+          git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
+          
           git add -A
           if ! git diff --cached --quiet; then
-            git fetch origin main
-            git rebase origin/main
-            git commit -m "🤖 Auto-update artefacts [skip ci]" -m "base:$SHA"
-            git push --force-with-lease
+            git commit -m "🤖 Auto-update artifacts [skip ci]" -m "build:${{ steps.sha.outputs.sha_short }}"
+            git pull --rebase
+            git push || echo "Push failed, continuing with deployment"
           fi
 
-      # ───────── upload Pages artefact ─────────
-      - uses: actions/upload-pages-artifact@v3
-        with: { path: apps/loader/public }
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/loader/public
+          retention-days: 7
 
-# ────────────────────────────────────────────────────────────────
-#  deploy  ➜  publishes Pages artefact + Discord notification
-# ────────────────────────────────────────────────────────────────
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
+    timeout-minutes: 3
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
 
     steps:
-      - id: deploy
-        uses: actions/deploy-pages@v4   # publishes artifact uploaded above
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
 
-      - name: 📢 Discord notify
-        if: success() && env.DISCORD_WEBHOOK != ''
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          PAGE_URL:        ${{ steps.deploy.outputs.page_url }}
-          SHA:             ${{ needs.build.outputs.sha_short }}
+      - name: Send notification
+        if: ${{ success() && env.DISCORD_WEBHOOK != '' }}
         run: |
-          curl -s -H "Content-Type: application/json" -X POST \
-               -d "{\"content\":\"✅ Stealth-Loader $SHA deployed → $PAGE_URL\"}" \
+          CACHE_STATUS="${{ needs.build.outputs.cache_hit == 'true' && '(cached)' || '(rebuilt)' }}"
+          
+          curl -H "Content-Type: application/json" \
+               -d "{\"content\":\"✅ Stealth-Loader ${CACHE_STATUS} ${{ needs.build.outputs.sha_short }} deployed → ${{ steps.deploy.outputs.page_url }}\"}" \
                "$DISCORD_WEBHOOK" || true
