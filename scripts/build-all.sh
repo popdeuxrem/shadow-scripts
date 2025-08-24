@@ -1,50 +1,61 @@
 #!/usr/bin/env bash
+# ======================================================================
+# build-all.sh  •  run locally or in CI
+# ======================================================================
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-CONF_OUT="apps/loader/public/configs"
-OBF_OUT="apps/loader/public/obfuscated"
-PUBLIC="apps/loader/public"
-SRC_SCRIPTS="src-scripts"
+CONF_DIR="apps/loader/public/configs"
+OBF_DIR="apps/loader/public/obfuscated"
+PUBLIC_DIR="apps/loader/public"
+SRC_JS="src-scripts"
 DNS_SERVER="${DNS_SERVER:-1.1.1.1}"
 
-echo "=== [1/7] Clean outputs ==="
-rm -rf "$CONF_OUT" "$OBF_OUT"
-mkdir -p "$CONF_OUT" "$OBF_OUT"
+echo "=== [1/8] Clean outputs ==="
+rm -rf "$CONF_DIR" "$OBF_DIR"
+mkdir -p "$CONF_DIR" "$OBF_DIR" "$PUBLIC_DIR"
 
-echo "=== [2/7] Generate multi-platform configs ==="
+echo "=== [2/8] Generate platform configs ==="
 export DNS_SERVER
 node scripts/gen-shadowrocket.js
 node scripts/gen-stash.js
 node scripts/gen-loon.js
 node scripts/gen-mobileconfig.js
 
-echo "=== [3/7] Obfuscate & base64 encode scripts ==="
-find "$SRC_SCRIPTS" -type f -name '*.js' | while read -r src; do
-  base=$(basename "$src" .js)
-  obf="$OBF_OUT/$base.ob.js"
-  b64="$OBF_OUT/$base.js.b64"
-  npx javascript-obfuscator "$src" \
+echo "=== [3/8] Obfuscate + Base64 encode payloads ==="
+find "$SRC_JS" -type f -name '*.js' | while read -r SRC; do
+  base="$(basename "$SRC" .js)"
+  obf="$OBF_DIR/$base.ob.js"
+  b64="$OBF_DIR/$base.js.b64"
+  npx javascript-obfuscator "$SRC" \
       --output "$obf" --compact true --self-defending true --control-flow-flattening true
   base64 "$obf" > "$b64"
 done
 
-echo "=== [4/7] Regenerate manifest.json ==="
-find "$OBF_OUT" -name '*.js.b64' -printf '%f\n' \
-  | jq -R . | jq -s . > "$PUBLIC/manifest.json"
+echo "=== [4/8] Regenerate manifest.json ==="
+command -v jq >/dev/null 2>&1 || { echo "❌ jq not found"; exit 1; }
+find "$OBF_DIR" -name '*.js.b64' -printf '%f\n' \
+  | jq -R . | jq -s . > "$PUBLIC_DIR/manifest.json"
 
-echo "=== [5/7] Generate catalog.html ==="
-node scripts/gen-catalog.js
+echo "=== [5/8] Generate catalog.html ==="
+cp scripts/catalog-template.html "$PUBLIC_DIR/catalog.html"
 
-echo "=== [6/7] Copy manifest-loader → index.html ==="
-cp scripts/manifest-loader.html "$PUBLIC/index.html"
+echo "=== [6/8] Copy manifest loader → index.html ==="
+cp scripts/manifest-loader.html   "$PUBLIC_DIR/index.html"
 
-echo "=== [7/7] Summary ==="
-ls -lh "$CONF_OUT" | sed 's/^/CONFIGS  /'
-ls -lh "$OBF_OUT"  | sed 's/^/OBF      /'
-echo "Manifest : $PUBLIC/manifest.json"
-echo "Catalog  : $PUBLIC/catalog.html"
-echo "Loader   : $PUBLIC/index.html"
-echo "=== Build complete. Ready for CI deploy ==="
+echo "=== [7/8] Validate build artifacts ==="
+[ -s "$PUBLIC_DIR/manifest.json" ] || { echo "❌ manifest.json empty"; exit 1; }
+find "$PUBLIC_DIR" -type f \( -name '*.js' -o -name '*.json' -o -name '*.b64' \) |
+while read -r F; do
+  [ -s "$F" ] || { echo "❌ Empty file: $F"; exit 1; }
+done
+
+echo "=== [8/8] Summary ==="
+echo "Configs         :"; ls -1 "$CONF_DIR"
+echo "Obfuscated *.b64:"; ls -1 "$OBF_DIR" | wc -l
+echo "Loader          : $PUBLIC_DIR/index.html"
+echo "Manifest        : $PUBLIC_DIR/manifest.json"
+echo "Catalog         : $PUBLIC_DIR/catalog.html"
+echo "=== Build OK — ready for commit / CI deploy ==="
