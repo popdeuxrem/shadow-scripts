@@ -89,11 +89,11 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # Make sure we always install dependencies, as they might be needed even with cached build
+          # Install normal dependencies
           pnpm install --frozen-lockfile
           
-          # Install specific dependencies if not included in package.json
-          pnpm add -D js-yaml javascript-obfuscator
+          # Install additional dependencies with workspace flag
+          pnpm add -w -D js-yaml javascript-obfuscator
 
       - name: Build artifacts
         if: ${{ steps.restore-build.outputs.cache-hit != 'true' || inputs.force_rebuild }}
