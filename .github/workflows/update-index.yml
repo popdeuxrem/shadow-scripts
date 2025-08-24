@@ -31,7 +31,6 @@ permissions:
 env:
   DNS_SERVER: "1.1.1.1"
   DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-  NODE_ENV: production
   PNPM_CACHE_FOLDER: .pnpm-store
 
 jobs:
@@ -63,7 +62,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20  # Using Node.js 20 for better stability
+          node-version: 20
           cache: 'pnpm'
 
       # Generate cache key without using hashFiles function
@@ -88,15 +87,22 @@ jobs:
             stealth-
 
       - name: Install dependencies
+        env:
+          NODE_ENV: development # Override NODE_ENV to install dev dependencies
         run: |
-          # Install normal dependencies
+          # Clear any existing node_modules to prevent conflicts
+          rm -rf node_modules
+          
+          # Install all dependencies including dev dependencies
           pnpm install --frozen-lockfile
           
-          # Install additional dependencies with workspace flag
-          pnpm add -w -D js-yaml javascript-obfuscator
+          # Explicitly install required packages
+          npm install -g js-yaml javascript-obfuscator
 
       - name: Build artifacts
         if: ${{ steps.restore-build.outputs.cache-hit != 'true' || inputs.force_rebuild }}
+        env:
+          NODE_ENV: production # Set back to production for build
         run: |
           chmod +x scripts/build-all.sh
           ./scripts/build-all.sh
