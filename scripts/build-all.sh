@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# scripts/build-all.sh ─ master orchestrator
-# Steps: clean → configs → mobileconfig → obfuscate → manifest/loader → validate
+# scripts/build-all.sh
+# Orchestrates: configs → obfuscation → manifest/catalog → loader → validation
 
 set -euo pipefail
 
@@ -11,91 +11,82 @@ CONF_DIR="apps/loader/public/configs"
 OBF_DIR="apps/loader/public/obfuscated"
 PUBLIC_DIR="apps/loader/public"
 SRC_JS="src-scripts"
-
+MASTER_RULES="configs/master-rules.yaml"          # <── fixed path
 DNS_SERVER="${DNS_SERVER:-1.1.1.1}"
-PREFER_GROUP="${MOBILECONFIG_GROUP:-Proxy}"
+PREFER_GROUP="${MOBILECONFIG_GROUP:-US}"
 
-die()  { printf '❌ %s\n' "$*" >&2; exit 1; }
-have() { command -v "$1" >/dev/null 2>&1; }
+die()  { echo "❌ $*" >&2; exit 1; }
+have() { command -v "$1" &>/dev/null; }
 
-# ---------- obfuscator ----------
-pick_obf() {
-  if have npx;  then echo "npx --yes javascript-obfuscator"; return; fi
-  if have pnpm; then echo "pnpm dlx javascript-obfuscator"; return; fi
-  die "javascript-obfuscator not found"
-}
-OBF_CMD="$(pick_obf)"
+# --- 0. prerequisites --------------------------------------------------------
+have node   || die "node not found"
+have pnpm   || die "pnpm not found – GitHub runner must enable corepack"
 
-# ---------- helpers ----------
-ensure_dirs() {
-  rm -rf "$CONF_DIR" "$OBF_DIR"
-  mkdir -p "$CONF_DIR" "$OBF_DIR" "$PUBLIC_DIR"
-}
+OBF_CMD="pnpm dlx javascript-obfuscator"
+$OBF_CMD --version >/dev/null 2>&1 || die "javascript-obfuscator not available (run: pnpm add -D javascript-obfuscator)"
 
-node_if() { [[ -f "$1" ]] && node "$1"; }
-
-json_manifest() {
-  if have jq; then
-    (cd "$OBF_DIR" && printf '%s\n' *.js.b64 2>/dev/null | jq -R . | jq -s .)
-  else
-    node - <<'NODE' "$OBF_DIR"
-const fs=require('fs'),p=require('path');
-const dir=process.argv[2];let a=[];
-try{a=fs.readdirSync(dir).filter(f=>f.endsWith('.js.b64')).sort();}catch{}
-console.log(JSON.stringify(a));
-NODE
-  fi
-}
-
-# ---------- 1. clean ----------
+# --- 1. clean outputs --------------------------------------------------------
 echo "=== [1/8] Clean outputs ==="
-ensure_dirs
+rm -rf "$CONF_DIR" "$OBF_DIR"
+mkdir -p "$CONF_DIR" "$OBF_DIR" "$PUBLIC_DIR"
 
-# ---------- 2. configs ----------
-echo "=== [2/8] Generate configs ==="
-export DNS_SERVER PREFER_GROUP
-for f in gen-shadowrocket.js gen-stash.js gen-loon.js gen-mobileconfig.js; do
-  node_if "scripts/$f" || echo "↷ $f skipped"
+# --- 2. generate platform configs -------------------------------------------
+echo "=== [2/8] Generate platform configs ==="
+export DNS_SERVER PREFER_GROUP MASTER_RULES
+for gen in gen-shadowrocket.js gen-stash.js gen-loon.js gen-mobileconfig.js; do
+  if [[ -f "scripts/$gen" ]]; then
+    node "scripts/$gen"
+  else
+    echo "↷ skip (missing generator): scripts/$gen"
+  fi
 done
 
-# ---------- 3. obfuscate ----------
-echo "=== [3/8] Obfuscate scripts ==="
+# --- 3. obfuscate payloads ---------------------------------------------------
+echo "=== [3/8] Obfuscate + Base64 encode payloads ==="
 if compgen -G "$SRC_JS/*.js" >/dev/null; then
-  find "$SRC_JS" -type f -name '*.js' | while read -r JS; do
-    base="$(basename "$JS" .js)"
-    "$OBF_CMD" "$JS" --output "$OBF_DIR/$base.ob.js" --compact true --self-defending true \
-      --control-flow-flattening true --dead-code-injection true
-    base64 "$OBF_DIR/$base.ob.js" > "$OBF_DIR/$base.js.b64"
-  done
+  while IFS= read -r SRC; do
+    base=$(basename "$SRC" .js)
+    obf="$OBF_DIR/$base.ob.js"
+    b64="$OBF_DIR/$base.js.b64"
+    $OBF_CMD "$SRC" --output "$obf" \
+      --compact true --self-defending true --control-flow-flattening true
+    base64 "$obf" > "$b64"
+    [[ -s "$b64" ]] || die "Empty payload after obfuscation: $b64"
+  done < <(find "$SRC_JS" -type f -name '*.js' | sort)
 else
-  echo "↷ no JS payloads"
+  echo "↷ no source payloads found under $SRC_JS"
 fi
 
-# ---------- 4. manifest ----------
-echo "=== [4/8] Build manifest.json ==="
-json_manifest > "$PUBLIC_DIR/manifest.json"
-
-# ---------- 5. loader / catalog ----------
-echo "=== [5/8] Loader & catalog ==="
-[[ -f scripts/manifest-loader.html ]] && cp scripts/manifest-loader.html "$PUBLIC_DIR/index.html"
-[[ -f scripts/catalog-template.html  ]] && cp scripts/catalog-template.html  "$PUBLIC_DIR/catalog.html"
-
-# ---------- 6. optional HTML minify ----------
-if have html-minifier && [[ -f "$PUBLIC_DIR/index.html" ]]; then
-  html-minifier --collapse-whitespace --remove-comments \
-    -o "$PUBLIC_DIR/index.html" "$PUBLIC_DIR/index.html"
+# --- 4. manifest -------------------------------------------------------------
+echo "=== [4/8] Regenerate manifest.json ==="
+if have jq; then
+  ( cd "$OBF_DIR" && ls *.js.b64 2>/dev/null | jq -R . | jq -s . ) > "$PUBLIC_DIR/manifest.json"
+else
+  node - <<'NODE' "$OBF_DIR" "$PUBLIC_DIR/manifest.json"
+    const fs  = require('fs'), p = require('path');
+    const dir = process.argv[2], out = process.argv[3];
+    let files = [];
+    try { files = fs.readdirSync(dir).filter(f => f.endsWith('.js.b64')).sort(); } catch {}
+    fs.mkdirSync(p.dirname(out), { recursive: true });
+    fs.writeFileSync(out, JSON.stringify(files, null, 2) + '\n');
+NODE
 fi
 
-# ---------- 7. validate ----------
-echo "=== [6/8] Validate ==="
+# --- 5. static assets --------------------------------------------------------
+echo "=== [5/8] Copy catalog + loader templates ==="
+cp -f scripts/catalog-template.html  "$PUBLIC_DIR/catalog.html"     2>/dev/null || echo "↷ no catalog-template.html"
+cp -f scripts/manifest-loader.html   "$PUBLIC_DIR/index.html"       2>/dev/null || echo "↷ no manifest-loader.html"
+
+# --- 6. basic validation -----------------------------------------------------
+echo "=== [6/8] Validate build artifacts ==="
 [[ -s "$PUBLIC_DIR/manifest.json" ]] || die "manifest.json missing/empty"
-find "$OBF_DIR" -type f -name '*.js.b64' -size 0 -print -quit | grep -q . && die "zero-byte b64"
+find "$OBF_DIR" -type f -name '*.js.b64' -empty -print -quit | grep -q . && die "Empty .js.b64 files detected"
 
-# ---------- 8. summary ----------
+# --- 7. summary --------------------------------------------------------------
 echo "=== [7/8] Summary ==="
-echo "Configs   :" && ls -1 "$CONF_DIR"
-echo "Payloads  :" && ls -1 "$OBF_DIR" | wc -l
-echo "Manifest  : $PUBLIC_DIR/manifest.json"
-echo "Loader    : $PUBLIC_DIR/index.html"
-echo "Catalog   : $PUBLIC_DIR/catalog.html"
-echo "✅ Build complete"
+echo "Configs      : $(ls -1 "$CONF_DIR" 2>/dev/null | wc -l) file(s)"
+echo "Payloads     : $(find "$OBF_DIR" -name '*.js.b64' | wc -l) file(s)"
+echo "Loader       : $PUBLIC_DIR/index.html"
+echo "Manifest     : $PUBLIC_DIR/manifest.json"
+echo "Catalog      : $PUBLIC_DIR/catalog.html"
+echo "✅ Build complete."
