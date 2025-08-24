@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+    <key>PayloadIdentifier</key>
+    <string>shadow-scripts.stealth-dns</string>
+    <key>PayloadUUID</key>
+    <string>728dffa8-4075-489b-84d6-51b1f21209ae</string>
+    <key>PayloadDisplayName</key>
+    <string>Stealth DNS</string>
+    <key>PayloadOrganization</key>
+    <string>Shadow Scripts</string>
+    <key>PayloadDescription</key>
+    <string>Sets system DNS: 1.1.1.1</string>
+    <key>PayloadContent</key>
+    <array>
+      <dict>
+        <key>PayloadType</key>
+        <string>com.apple.dnsSettings.managed</string>
+        <key>PayloadVersion</key>
+        <integer>1</integer>
+        <key>PayloadIdentifier</key>
+        <string>shadow-scripts.dns.3bbd9d1f-8e57-4b41-b913-a555ae5436ed</string>
+        <key>PayloadUUID</key>
+        <string>4f0c2190-bc42-4102-8ab2-a1e3fb01c65f</string>
+        <key>PayloadDisplayName</key>
+        <string>DNS Settings</string>
+        <key>DNSSettings</key>
+        <dict>
+          <key>ServerAddresses</key>
+          <array>
+            <string>1.1.1.1</string>
+          </array>
+        </dict>
+      </dict>
+    </array>
+  </dict>
+</plist>

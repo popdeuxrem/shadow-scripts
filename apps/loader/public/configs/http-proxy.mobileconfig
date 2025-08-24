@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+    <key>PayloadIdentifier</key>
+    <string>shadow-scripts.http-proxy</string>
+    <key>PayloadUUID</key>
+    <string>fe4748f3-9a9c-4482-9fa7-c5b625dbce5c</string>
+    <key>PayloadDisplayName</key>
+    <string>HTTP Proxy (Global)</string>
+    <key>PayloadOrganization</key>
+    <string>Shadow Scripts</string>
+    <key>PayloadDescription</key>
+    <string>Global HTTP proxy via YOUR_HTTP_HOST:8080</string>
+    <key>PayloadContent</key>
+    <array>
+      <dict>
+        <key>PayloadType</key>
+        <string>com.apple.proxy.http.global</string>
+        <key>PayloadVersion</key>
+        <integer>1</integer>
+        <key>PayloadIdentifier</key>
+        <string>shadow-scripts.proxy.http.d7f3e748-6e07-4b59-8ad0-9d6a85ae44fa</string>
+        <key>PayloadUUID</key>
+        <string>83758ba5-0374-42bf-b727-77c21557948d</string>
+        <key>PayloadDisplayName</key>
+        <string>HTTP Proxy (HTTP-US1)</string>
+        <key>ProxyServer</key>
+        <string>YOUR_HTTP_HOST</string>
+        <key>ProxyServerPort</key>
+        <integer>8080</integer>
+        <key>ProxyUsername</key>
+        <string>USERNAME</string>
+        <key>ProxyPassword</key>
+        <string>PASSWORD</string>
+      </dict>
+    </array>
+  </dict>
+</plist>
