@@ -12,7 +12,7 @@
         <key>PayloadIdentifier</key>
         <string>com.popdeuxrem.shadowrocket.config</string>
         <key>PayloadUUID</key>
-        <string>546a8c0a-50a7-46d5-b854-bfb8d1b68269</string>
+        <string>7f8a3215-7d2c-4ff6-8eb7-d3827da4b4c7</string>
         <key>PayloadEnabled</key>
         <true/>
         <key>PayloadDisplayName</key>
@@ -280,7 +280,7 @@
     <key>PayloadIdentifier</key>
     <string>com.popdeuxrem.shadowrocket</string>
     <key>PayloadUUID</key>
-    <string>127b3aa7-94be-4512-9f36-6715199c74be</string>
+    <string>51ce827a-824e-4a91-a477-9f0ec360a847</string>
     <key>PayloadDisplayName</key>
     <string>Shadowrocket Auto Config</string>
     <key>PayloadDescription</key>
