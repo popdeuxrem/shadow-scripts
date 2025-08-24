@@ -1,96 +1,131 @@
-#!/usr/bin/env node
-/**
- * Generate shadowrocket.mobileconfig from master-rules.yaml
- * iOS users can install directly to apply routing + MITM.
- */
+// scripts/gen-mobileconfig.js
+// Build valid Apple profiles from configs/master-rules.yaml
+// Outputs:
+//  - apps/loader/public/configs/stealth-dns.mobileconfig
+//  - apps/loader/public/configs/http-proxy.mobileconfig  (if HTTP proxy found)
+//  - apps/loader/public/configs/network-bundle.mobileconfig (DNS + HTTP)
+// Notes: iOS accepts only Apple payload types. No app-specific Shadowrocket payloads.
 
-import fs from 'fs';
-import path from 'path';
-import yaml from 'js-yaml';
-import plist from 'plist';
+const fs = require('fs');
+const path = require('path');
+const yaml = require('js-yaml');
+const plist = require('plist');
+const { randomUUID } = require('crypto');
 
-const root    = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const src     = path.join(root, 'configs', 'master-rules.yaml');
-const outDir  = path.join(root, 'apps', 'loader', 'public', 'configs');
-const out     = path.join(outDir, 'shadowrocket.mobileconfig');
+const ROOT   = path.resolve(__dirname, '..');
+const SRC    = path.join(ROOT, 'configs', 'master-rules.yaml');
+const OUTDIR = path.join(ROOT, 'apps/loader/public/configs');
 
-const yml = yaml.load(fs.readFileSync(src, 'utf8'));
+const ORG    = 'Shadow Scripts';
+const ISSUER = 'shadow-scripts';
+const dnsFromEnv = process.env.DNS_SERVER || null;
 
-const PROFILE_ID = 'com.popdeuxrem.shadowrocket';
-const ORGANIZATION = 'PopDeuxRem Scripts';
-const DISPLAY_NAME = 'Shadowrocket Auto Config';
-const DESCRIPTION = 'Auto-install proxy config with MITM, DNS, routing rules.';
-const UUID = () => crypto.randomUUID();
+// ---------- helpers ----------
+const uuid = () => randomUUID();
+const load = () => yaml.load(fs.readFileSync(SRC, 'utf8')) || {};
 
-/**
- * Build the Shadowrocket payload using plist format
- */
-const payload = {
-  PayloadContent: [{
-    PayloadType: 'com.shadowrocket.config',
+function allProxies(doc) {
+  const out = [];
+  for (const region of Object.keys(doc.proxies || {})) {
+    for (const p of doc.proxies[region]) out.push(p);
+  }
+  return out;
+}
+function findHttpProxy(doc, preferGroup) {
+  const proxies = allProxies(doc);
+  // try group membership first
+  if (preferGroup && doc.groups && doc.groups[preferGroup]) {
+    const byName = new Map(proxies.map(p => [p.name, p]));
+    for (const name of doc.groups[preferGroup]) {
+      const p = byName.get(name);
+      if (p && String(p.type).toLowerCase() === 'http') return p;
+    }
+  }
+  // fallback: any HTTP proxy
+  return proxies.find(p => String(p.type).toLowerCase() === 'http') || null;
+}
+
+function buildDnsPayload(addresses) {
+  return {
+    PayloadType: 'com.apple.dnsSettings.managed',
     PayloadVersion: 1,
-    PayloadIdentifier: `${PROFILE_ID}.config`,
-    PayloadUUID: UUID(),
-    PayloadEnabled: true,
-    PayloadDisplayName: DISPLAY_NAME,
-    PayloadDescription: DESCRIPTION,
+    PayloadIdentifier: `${ISSUER}.dns.${uuid()}`,
+    PayloadUUID: uuid(),
+    PayloadDisplayName: 'DNS Settings',
+    DNSSettings: { ServerAddresses: addresses }
+  };
+}
 
-    dns: yml.dns || '1.1.1.1',
+function buildHttpGlobalPayload(p) {
+  // Apple global HTTP proxy payload
+  // Keys: ProxyServer, ProxyServerPort, ProxyUsername, ProxyPassword
+  const payload = {
+    PayloadType: 'com.apple.proxy.http.global',
+    PayloadVersion: 1,
+    PayloadIdentifier: `${ISSUER}.proxy.http.${uuid()}`,
+    PayloadUUID: uuid(),
+    PayloadDisplayName: `HTTP Proxy (${p.name})`,
+    ProxyServer: p.host,
+    ProxyServerPort: Number(p.port),
+  };
+  if (p.user) payload.ProxyUsername = String(p.user);
+  if (p.pass) payload.ProxyPassword = String(p.pass);
+  return payload;
+}
 
-    proxies: Object.values(yml.proxies || {}).flat().map(p => {
-      const obj = {
-        type: p.type,
-        name: p.name,
-        host: p.host,
-        port: p.port,
-      };
-      if (p.user)        obj.user = p.user;
-      if (p.pass)        obj.pass = p.pass;
-      if (p.tls)         obj.tls = true;
-      if (p.ws)          obj.ws = true;
-      if (p.ws_path)     obj['ws-path'] = p.ws_path;
-      if (p.servername)  obj.servername = p.servername;
-      return obj;
-    }),
+function writeProfile(filename, payloads, displayName, description) {
+  const profile = {
+    PayloadType: 'Configuration',
+    PayloadVersion: 1,
+    PayloadIdentifier: `${ISSUER}.${filename.replace(/\.mobileconfig$/,'')}`,
+    PayloadUUID: uuid(),
+    PayloadDisplayName: displayName,
+    PayloadOrganization: ORG,
+    PayloadDescription: description,
+    PayloadContent: payloads
+  };
+  fs.mkdirSync(OUTDIR, { recursive: true });
+  const out = path.join(OUTDIR, filename);
+  fs.writeFileSync(out, plist.build(profile));
+  console.log('Wrote', out);
+}
 
-    'proxy-groups': Object.entries(yml.groups || {}).map(([name, proxies]) => ({
-      name,
-      type: 'select',
-      proxies
-    })),
+// ---------- main ----------
+(function main() {
+  const doc = load();
 
-    rules: [
-      ...(yml.rules || []).map(r =>
-        typeof r === 'string' ? r : `${r.type},${r.value},${r.group}`),
-      ...(yml.external_rule_sets || []).map(x =>
-        `RULE-SET,${x.url},${x.group}`),
-      ...(yml.block_domains || []).map(d =>
-        `DOMAIN-SUFFIX,${d},REJECT`),
-      'FINAL,US'
-    ],
+  // DNS
+  const dnsAddrs = dnsFromEnv
+    ? [dnsFromEnv]
+    : (doc.dns ? [String(doc.dns)] : ['1.1.1.1']);
+  const dnsPayload = buildDnsPayload(dnsAddrs);
+  writeProfile(
+    'stealth-dns.mobileconfig',
+    [dnsPayload],
+    'Stealth DNS',
+    `Sets system DNS: ${dnsAddrs.join(', ')}`
+  );
 
-    mitm: {
-      enabled: true,
-      hostnames: yml.mitm_hostnames || []
-    },
+  // HTTP Global Proxy (optional, only if present and supported)
+  const preferGroup = process.env.MOBILECONFIG_GROUP || 'US';
+  const http = findHttpProxy(doc, preferGroup);
+  if (http) {
+    const httpPayload = buildHttpGlobalPayload(http);
+    writeProfile(
+      'http-proxy.mobileconfig',
+      [httpPayload],
+      'HTTP Proxy (Global)',
+      `Global HTTP proxy via ${http.host}:${http.port}`
+    );
 
-    script: yml.scripts?.loader_url
-      ? {
-          http_response: `^https?:\\/\\/.+`,
-          script_path: yml.scripts.loader_url
-        }
-      : undefined
-  }],
-
-  PayloadType: 'Configuration',
-  PayloadVersion: 1,
-  PayloadIdentifier: PROFILE_ID,
-  PayloadUUID: UUID(),
-  PayloadDisplayName: DISPLAY_NAME,
-  PayloadDescription: DESCRIPTION,
-  PayloadOrganization: ORGANIZATION
-};
-
-fs.mkdirSync(outDir, { recursive: true });
-fs.writeFileSync(out, plist.build(payload));
-console.log('✅  Generated', out);
+    // Bundle DNS + HTTP
+    writeProfile(
+      'network-bundle.mobileconfig',
+      [dnsPayload, httpPayload],
+      'Network Bundle (DNS + HTTP Proxy)',
+      'Installs DNS and a global HTTP proxy in one profile'
+    );
+  } else {
+    console.log('No HTTP proxy found in YAML. Skipped http-proxy.mobileconfig.');
+  }
+})();
