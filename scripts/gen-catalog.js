@@ -1,15 +1,34 @@
 #!/usr/bin/env node
-const fs = require("fs");
-const path = require("path");
+/**
+ * scripts/gen-catalog.js
+ * ------------------------------------------------------------
+ * Reads manifest.json (array of *.js.b64) and stamps that list
+ * into scripts/catalog-template.html where the placeholder
+ *   __CATALOG_LIST__
+ * lives.  Each item links to the raw base64 file.
+ */
+const fs   = require('fs');
+const path = require('path');
 
-const configsDir = path.resolve(__dirname, "../apps/loader/public/configs");
-const outHtml = path.join(configsDir, "../catalog.html");
-const files = fs.readdirSync(configsDir).filter(f => !f.startsWith("."));
+const ROOT        = path.resolve(__dirname, '..');
+const MANIFEST    = path.join(ROOT, 'apps/loader/public/manifest.json');
+const TEMPLATE_IN = path.join(ROOT, 'scripts/catalog-template.html');
+const OUT_DIR     = path.join(ROOT, 'apps/loader/public');
+const OUT_FILE    = path.join(OUT_DIR, 'catalog.html');
 
-let html = `<html><head><title>Config Catalog</title></head><body><h1>Configs</h1><ul>`;
-for (const f of files) {
-  html += `<li><a href="configs/${f}">${f}</a></li>`;
+if (!fs.existsSync(MANIFEST)) {
+  console.error('manifest.json missing – run obfuscation step first');
+  process.exit(0);                     // *not* fatal for whole build
 }
-html += `</ul></body></html>`;
-fs.writeFileSync(outHtml, html);
-console.log("Wrote catalog.html");
+
+const files = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'));
+const list  = files.map(f =>
+  `<li><a href="../obfuscated/${f}" target="_blank" rel="noopener">${f}</a></li>`
+).join('\n');
+
+let html = fs.readFileSync(TEMPLATE_IN, 'utf8');
+html = html.replace('__CATALOG_LIST__', list || '<li>(no payloads)</li>');
+
+fs.mkdirSync(OUT_DIR, { recursive: true });
+fs.writeFileSync(OUT_FILE, html);
+console.log('✓ catalog.html →', path.relative(ROOT, OUT_FILE));
