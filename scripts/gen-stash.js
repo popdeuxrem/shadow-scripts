@@ -1,81 +1,88 @@
 #!/usr/bin/env node
 /**
- * master-rules.yaml -> stash.conf
+ * Build Stash (Clash-compatible) config
+ * master-rules.yaml ➜ apps/loader/public/configs/stash.conf
+ *
+ * Requirements: node, js-yaml
  */
 const fs   = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 
-const ROOT   = path.resolve(__dirname, '..');
-const SRC    = path.join(ROOT, 'configs/master-rules.yaml');
-const OUTDIR = path.join(ROOT, 'apps/loader/public/configs');
-const OUT    = path.join(OUTDIR, 'stash.conf');
+/* ─ env / paths ────────────────────────────────────────────── */
+const ROOT       = path.resolve(__dirname, '..');
+const MASTER     = process.env.MASTER_RULES || 'configs/master-rules.yaml';
+const OUT_DIR    = path.join(ROOT, 'apps/loader/public/configs');
+const OUT_FILE   = path.join(OUT_DIR, 'stash.conf');
+const DNS_SERVER = process.env.DNS_SERVER || '1.1.1.1';
 
-const doc = yaml.load(fs.readFileSync(SRC, 'utf8'));
-const out = [];
+/* ─ helpers ────────────────────────────────────────────────── */
+const loadYaml = fp => yaml.load(fs.readFileSync(fp, 'utf8'));
+const dump     = obj => yaml.dump(obj, { lineWidth: 100, noCompatMode: true });
 
-/* ---------- General ---------- */
-out.push('[General]');
-out.push(`dns-server = ${doc.dns || '1.1.1.1'}`);
-out.push('skip-proxy = 192.168.0.0/16, 10.0.0.0/8');
-out.push('');
-
-/* ---------- Proxy ---------- */
-out.push('[Proxy]');
-for (const region in doc.proxies || {}) {
-  for (const p of doc.proxies[region]) {
-    const line = [
-      p.name,
-      p.type,
-      p.host,
-      p.port,
-      p.user && `username=${p.user}`,
-      p.pass && `password=${p.pass}`,
-      p.tls  && 'tls=true',
-      p.ws   && 'ws=true',
-      p.ws_path && `ws-path=${p.ws_path}`,
-      p.fast_open !== undefined && `fast-open=${p.fast_open}`
-    ].filter(Boolean).join(', ');
-    out.push(line);
+function toClashProxy(p) {
+  const base = { name: p.name, type: p.type, server: p.host, port: p.port };
+  if (p.type === 'socks5' || p.type === 'http') {
+    if (p.user) base.username = p.user;
+    if (p.pass) base.password = p.pass;
   }
-}
-out.push('');
-
-/* ---------- Proxy Group ---------- */
-out.push('[Proxy Group]');
-for (const g in doc.groups || {}) {
-  out.push(`${g} = select, ${doc.groups[g].join(', ')}`);
-}
-out.push('');
-
-/* ---------- Rule ---------- */
-out.push('[Rule]');
-(doc.rules || []).forEach(r => {
-  const str = typeof r === 'string'
-    ? r
-    : `${r.type},${r.value},${r.group}`;
-  out.push(str);
-});
-(doc.external_rule_sets || []).forEach(e=>{
-  out.push(`RULE-SET,${e.url},${e.group}`);
-});
-(doc.block_domains || []).forEach(d=>{
-  out.push(`DOMAIN-SUFFIX,${d},REJECT`);
-});
-out.push('FINAL,Auto-All');
-
-/* ---------- MITM ---------- */
-if (doc.mitm_hostnames?.length) {
-  out.push('\n[MITM]');
-  out.push(`hostname = ${doc.mitm_hostnames.join(', ')}`);
+  if (p.type === 'vless' || p.type === 'vmess') {
+    base.uuid   = p.user;
+    base.tls    = !!p.tls;
+    if (p.ws) {
+      base.network  = 'ws';
+      base['ws-path'] = p.ws_path || '/';
+    }
+    if (p.servername) base.sni = p.servername;
+  }
+  // copy passthrough flags
+  ['ws', 'ws_path', 'fast_open'].forEach(k => {
+    if (p[k] !== undefined) base[k] = p[k];
+  });
+  return base;
 }
 
-/* ---------- Script ---------- */
-if (doc.scripts?.loader_url) {
-  out.push('\n[Script]');
-  out.push(`http-response ^https?:\/\/.+ script-response-body ${doc.scripts.loader_url}`);
+function buildConfig(doc) {
+  /* proxies */
+  const proxies = [];
+  Object.values(doc.proxies || {}).forEach(arr =>
+    arr.forEach(p => proxies.push(toClashProxy(p)))
+  );
+
+  /* groups */
+  const pg = Object.entries(doc.groups || {}).map(([name, list]) => ({
+    name, type: 'select', proxies: list
+  }));
+
+  /* rules */
+  const clashRules = [];
+  (doc.rules || []).forEach(r => {
+    if (typeof r === 'string') clashRules.push(r);
+    else clashRules.push(`${r.type},${r.value},${r.group}`);
+  });
+  (doc.external_rule_sets || []).forEach(e =>
+    clashRules.push(`RULE-SET,${e.url},${e.group}`)
+  );
+  (doc.block_domains || []).forEach(d =>
+    clashRules.push(`DOMAIN-SUFFIX,${d},REJECT`)
+  );
+  clashRules.push('FINAL,Proxy');
+
+  /* dns */
+  const dns = {
+    enable: true,
+    ipv6  : false,
+    nameserver: [DNS_SERVER, '8.8.8.8'],
+    fallback  : ['1.0.0.1']
+  };
+
+  return { proxies, 'proxy-groups': pg, rules: clashRules, dns };
 }
 
-fs.mkdirSync(OUTDIR, {recursive:true});
-fs.writeFileSync(OUT, out.join('\n') + '\n');
-console.log('Wrote', OUT);
+/* ─ main ───────────────────────────────────────────────────── */
+const doc = loadYaml(MASTER);
+const cfg = buildConfig(doc);
+
+fs.mkdirSync(OUT_DIR, { recursive: true });
+fs.writeFileSync(OUT_FILE, dump(cfg));
+console.log('✓ stash.conf ->', path.relative(ROOT, OUT_FILE));
