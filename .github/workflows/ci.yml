@@ -5,6 +5,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Add this permissions block
+permissions:
+  contents: write
+  pages: write
+
 env:
   DNS_SERVER: 1.1.1.1
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -17,8 +22,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          persist-credentials: false
 
       - name: Install pnpm
         uses: pnpm/action-setup@v3
@@ -39,11 +42,10 @@ jobs:
           chmod +x scripts/build-all.sh
           ./scripts/build-all.sh
 
-      # Option 1: Deploy directly to GitHub Pages without committing to main
-      - name: Deploy to GitHub Pages (gh-pages branch)
+      - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./apps/loader/public
           publish_branch: gh-pages
-          force_orphan: true  # clean history
+          force_orphan: true
