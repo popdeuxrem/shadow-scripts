@@ -1,11 +1,10 @@
 # ──────────────────────────────────────────────────────────────
 #  master-rules.yaml   │ authoritative policy for build-all.sh
-#  last-modified: 2025-08-23
+#  last-modified: 2025-08-25
 # ──────────────────────────────────────────────────────────────
 
 proxies:
   us:
-    # ⚡ Residential SOCKS5
     - type: socks5
       name: US-RESI
       host: 103.210.12.53
@@ -13,7 +12,6 @@ proxies:
       user: twozpyil
       pass: y4syr3w1dcuz
 
-    # ⚡ VLESS over WS+TLS (Jantit)
     - type: vless
       name: US-RESI2
       host: premiusa1.vpnjantit.com
@@ -25,33 +23,51 @@ proxies:
       fast_open: false
 
 groups:
-  # Any rule that points to group “US” will round-robin / fail-over
   US: [US-RESI, US-RESI2]
 
-# ──────────────────────────────────────────────────────────────
-#  Rules  (trimmed for brevity – identical to your last dump)
-#  ↓↓↓ KEEP EVERYTHING BELOW UNCHANGED UNLESS YOU REALLY NEED TO
-# ──────────────────────────────────────────────────────────────
 rules:
-
   # === FINANCE / PAYMENTS ===
   - { type: DOMAIN-SUFFIX, value: "paypal.com", group: "US" }
   - { type: DOMAIN-SUFFIX, value: "cash.app", group: "US" }
   - { type: DOMAIN-SUFFIX, value: "venmo.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "wise.com",  group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "wise.com", group: "US" }
   - { type: DOMAIN-SUFFIX, value: "stripe.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "link.com",   group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "moonpay.com",group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "link.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "moonpay.com", group: "US" }
 
   # === eSIM / BURNER ===
-  - { type: DOMAIN-SUFFIX, value: "textnow.com",  group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "burnerapp.com",group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "getsly.com",   group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "textnow.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "burnerapp.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "getsly.com", group: "US" }
   - { type: DOMAIN-SUFFIX, value: "slyphone.com", group: "US" }
 
-  # ……………………………………………………………………………
-  #  (all other rule blocks exactly as before)
-  # ……………………………………………………………………………
+  # === CRYPTO / EXCHANGES ===
+  - { type: DOMAIN-SUFFIX, value: "binance.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "coinbase.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "kraken.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "blockchain.com", group: "US" }
+
+  # === WALLET PROVIDERS ===
+  - { type: DOMAIN-SUFFIX, value: "metamask.io", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "trustwallet.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "phantom.app", group: "US" }
+
+  # === AI / SPOOF TARGETS ===
+  - { type: DOMAIN-SUFFIX, value: "openai.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "api.anthropic.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "claude.ai", group: "US" }
+
+  # === SOCIAL / SPOOF ===
+  - { type: DOMAIN-SUFFIX, value: "instagram.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "snapchat.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "tiktok.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "telegram.org", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "whatsapp.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "x.com", group: "US" }
+
+  # === MISC / SPOOF TARGETS ===
+  - { type: DOMAIN-SUFFIX, value: "gemini.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "stripe.network", group: "US" }
 
 mitm_hostnames:
   - "*.paypal.com"
@@ -87,35 +103,35 @@ block_domains:
   - m.stripe.com
 
 external_rule_sets:
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/openai.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/openai.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/discord.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/discord.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/facebook.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/facebook.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/github.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/github.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/instagram.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/instagram.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/jetbrains.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/jetbrains.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/linkedin.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/linkedin.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/medium.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/medium.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/pornhub.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/pornhub.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/reddit.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/reddit.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/redis.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/redis.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/telegram.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/telegram.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/twitter.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/twitter.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/whatsapp.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/whatsapp.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/xvideos.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/xvideos.list"
     group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/master/domains/youtube.list"
+  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/youtube.list"
     group: "US"
