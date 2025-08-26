@@ -12,13 +12,13 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    name: Build & Obfuscate + Deploy
+    name: Build & Deploy
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          persist-credentials: false  # we'll use PAT or GITHUB_TOKEN manually
+          persist-credentials: false
 
       - name: Install pnpm
         uses: pnpm/action-setup@v3
@@ -29,7 +29,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 18
-          cache: 'pnpm'  # Now this works because pnpm is installed first
+          cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
@@ -39,14 +39,7 @@ jobs:
           chmod +x scripts/build-all.sh
           ./scripts/build-all.sh
 
-      - name: Commit & push generated files
-        run: |
-          git config user.name "gh-actions"
-          git config user.email "actions@github.com"
-          git add apps/loader/public
-          git commit -m "🔁 Auto-update obfuscated scripts + configs" || echo "No changes to commit"
-          git push origin main
-
+      # Option 1: Deploy directly to GitHub Pages without committing to main
       - name: Deploy to GitHub Pages (gh-pages branch)
         uses: peaceiris/actions-gh-pages@v4
         with:
