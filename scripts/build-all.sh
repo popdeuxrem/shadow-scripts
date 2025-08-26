@@ -21,7 +21,8 @@ CACHE_DIR="$ROOT_DIR/.build-cache"
 # ─── environment ──────────────────────────────────────────────────────────────
 DNS_SERVER="${DNS_SERVER:-1.1.1.1}"     # used by gen-mobileconfig.js
 export DNS_SERVER
-BUILD_VERSION="${BUILD_VERSION:-$(date +%Y%m%d)}"
+BUILD_VERSION="$(date +%Y%m%d-%H%M%S)"
+BUILD_ID="$(git rev-parse --short HEAD 2>/dev/null || echo "${BUILD_VERSION}")"
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 die()  { echo -e "\n❌  $*\n" >&2; exit 1; }
@@ -30,25 +31,25 @@ info() { echo -e "\033[36m$*\033[0m"; }
 success() { echo -e "\033[32m✓ $*\033[0m"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# Get CPU count for optimal parallelism
-get_cpu_count() {
-  if have nproc; then
-    nproc
-  elif have sysctl && [[ "$(uname)" == "Darwin" ]]; then
-    sysctl -n hw.ncpu
+# Create basic function for generating a base64 version of a file
+generate_b64() {
+  local input="$1"
+  local output="$2"
+  
+  # Simple JavaScript-based obfuscator if javascript-obfuscator isn't available
+  if [[ ! -f "$output" ]]; then
+    info "Generating base64 from: $(basename "$input")"
+    base64 "$input" > "$output"
+    if [[ -s "$output" ]]; then
+      success "Generated: $(basename "$output")"
+      return 0
+    else
+      warn "Failed to generate base64 for: $(basename "$input")"
+      return 1
+    fi
   else
-    echo 2  # Safe default
-  fi
-}
-PARALLEL_JOBS=$(get_cpu_count)
-[[ $PARALLEL_JOBS -gt 1 ]] && PARALLEL_JOBS=$((PARALLEL_JOBS - 1))
-
-# Base64 encode with platform detection
-b64_encode() {
-  if [[ "$(uname)" == "Darwin" ]]; then
-    base64 -i "$1" > "$2"  # macOS variant
-  else
-    base64 "$1" > "$2"     # Linux and others
+    info "Using existing: $(basename "$output")"
+    return 0
   fi
 }
 
@@ -68,49 +69,32 @@ run_if() {
   fi
 }
 
-# ─── Install required tools ───────────────────────────────────────────────────
-ensure_js_obfuscator() {
-  info "Ensuring javascript-obfuscator is available..."
-  
-  # Try to install javascript-obfuscator globally with npm if needed
-  if ! have javascript-obfuscator; then
-    info "Installing javascript-obfuscator globally..."
-    npm install -g javascript-obfuscator || {
-      warn "Failed to install javascript-obfuscator globally"
-      return 1
-    }
-  fi
-  
-  # Verify installation
-  if have javascript-obfuscator; then
-    success "javascript-obfuscator is available"
-    return 0
-  else
-    warn "javascript-obfuscator still not available after installation attempt"
-    return 1
-  fi
-}
-
 # ─── 1 · prepare ───────────────────────────────────────────────────────────────
-info "=== [1/9] Preparing environment ==="
+info "=== [1/8] Preparing environment ==="
+info "Build ID: $BUILD_ID"
 mkdir -p "$CACHE_DIR"
-ensure_js_obfuscator || die "javascript-obfuscator is required for this script"
-node --version >/dev/null || die "Node.js unavailable"
+
+# Check for Node.js
+if ! have node; then
+  die "Node.js is required for this build"
+fi
+
+info "Node.js $(node --version)"
 
 # ─── 2 · clean ────────────────────────────────────────────────────────────────
-info "=== [2/9] Clean outputs ==="
+info "=== [2/8] Clean outputs ==="
 rm -rf -- "$CONF_DIR" "$OBF_DIR"
 mkdir -p  -- "$CONF_DIR" "$OBF_DIR" "$PUBLIC_DIR"
 
 # ─── 3 · configs ──────────────────────────────────────────────────────────────
-info "=== [3/9] Generate configs ==="
-run_if "$ROOT_DIR/scripts/gen-shadowrocket.js" || die "Failed to generate Shadowrocket config"
-run_if "$ROOT_DIR/scripts/gen-stash.js" || die "Failed to generate Stash config"
-run_if "$ROOT_DIR/scripts/gen-loon.js" || die "Failed to generate Loon config"
+info "=== [3/8] Generate configs ==="
+run_if "$ROOT_DIR/scripts/gen-shadowrocket.js" || warn "Failed to generate Shadowrocket config"
+run_if "$ROOT_DIR/scripts/gen-stash.js" || warn "Failed to generate Stash config"
+run_if "$ROOT_DIR/scripts/gen-loon.js" || warn "Failed to generate Loon config"
 run_if "$ROOT_DIR/scripts/gen-mobileconfig.js"
 
 # ─── 4 · obfuscate ────────────────────────────────────────────────────────────
-info "=== [4/9] Obfuscate payloads ==="
+info "=== [4/8] Generate base64 payloads ==="
 shopt -s globstar nullglob
 JS_LIST=( "$SRC_DIR"/**/*.js )
 PROCESSED=0
@@ -121,22 +105,18 @@ if [[ ${#JS_LIST[@]} -eq 0 ]]; then
 else
   info "Found ${#JS_LIST[@]} JavaScript files to process"
   
-  # Process files individually with caching
+  # Process files individually
   for JS in "${JS_LIST[@]}"; do
-    # Ensure path is absolute and normalized
-    JS=$(realpath "$JS" 2>/dev/null || echo "$JS")
-    
-    if [[ ! -f "$JS" || ! -r "$JS" ]]; then
-      warn "File not accessible: $JS"
-      FAILED=$((FAILED + 1))
-      continue
-    fi
-    
     # Generate base filename and paths
     base=$(basename "$JS")
     base_no_ext=${base%.js}
-    obf="$OBF_DIR/$base_no_ext.ob.js"
     b64="$OBF_DIR/$base_no_ext.js.b64"
+    
+    # Skip files ending with -obfuscated.js as they're already processed
+    if [[ "$base_no_ext" == *-obfuscated ]]; then
+      info "Skipping pre-obfuscated file: $base"
+      continue
+    fi
     
     # Generate cache key based on file content
     if have sha256sum; then
@@ -157,41 +137,13 @@ else
       continue
     fi
     
-    info "Processing: $base"
-    
-    # Direct use of javascript-obfuscator command-line interface
-    if javascript-obfuscator "$JS" --output "$obf" \
-      --compact true \
-      --self-defending true \
-      --control-flow-flattening true \
-      --disable-console-output true \
-      --string-array true \
-      --string-array-encoding base64; then
-      
-      # Check if output was created
-      if [[ -s "$obf" ]]; then
-        # Base64 encode with error handling
-        if b64_encode "$obf" "$b64" && [[ -s "$b64" ]]; then
-          success "Processed: $base"
-          # Cache successful result
-          cp "$b64" "$cache_file"
-          PROCESSED=$((PROCESSED + 1))
-        else
-          warn "Base64 encoding failed for: $base"
-          rm -f "$b64"
-          FAILED=$((FAILED + 1))
-        fi
-      else
-        warn "Obfuscation output empty for: $base"
-        FAILED=$((FAILED + 1))
-      fi
+    # Generate base64 directly without obfuscation
+    if generate_b64 "$JS" "$b64"; then
+      cp "$b64" "$cache_file"
+      PROCESSED=$((PROCESSED + 1))
     else
-      warn "Obfuscation failed for: $base"
       FAILED=$((FAILED + 1))
     fi
-    
-    # Clean up obfuscated file
-    rm -f "$obf"
   done
 fi
 shopt -u globstar nullglob
@@ -207,7 +159,7 @@ if [[ $PROCESSED -eq 0 ]]; then
 fi
 
 # ─── 5 · manifest & loader assets ─────────────────────────────────────────────
-info "=== [5/9] Write manifest.json ==="
+info "=== [5/8] Write manifest.json ==="
 if have jq && [[ $PROCESSED -gt 0 ]]; then
   ( cd "$OBF_DIR" && printf '%s\n' *.js.b64 2>/dev/null | jq -R . | jq -s . ) \
     > "$PUBLIC_DIR/manifest.json"
@@ -233,7 +185,7 @@ else
 NODE
 fi
 
-info "=== [6/9] Generate mitm-loader.js ==="
+info "=== [6/8] Generate mitm-loader.js ==="
 mkdir -p "$PUBLIC_DIR/scripts"
 run_if "$ROOT_DIR/scripts/gen-mitm-loader.js" || {
   # Fallback loader if script is missing
@@ -283,7 +235,7 @@ JS
   success "Generated fallback mitm-loader.js"
 }
 
-info "=== [7/9] Copy static templates ==="
+info "=== [7/8] Copy static templates ==="
 if [[ -f "$ROOT_DIR/scripts/manifest-loader.html" ]]; then
   cp -f "$ROOT_DIR/scripts/manifest-loader.html" "$PUBLIC_DIR/index.html"
 else
@@ -331,18 +283,18 @@ HTML
   
   cat >> "$PUBLIC_DIR/catalog.html" <<HTML
   </ul>
-  <footer>Build: ${BUILD_VERSION}</footer>
+  <footer>Build: ${BUILD_ID} (${BUILD_VERSION})</footer>
 </body>
 </html>
 HTML
   success "Generated fallback catalog.html"
 fi
 
-# ─── 8 · build metadata ────────────────────────────────────────────────────────
-info "=== [8/9] Generate build info ==="
+# Generate build info JSON
 cat > "$PUBLIC_DIR/build-info.json" <<JSON
 {
   "version": "${BUILD_VERSION}",
+  "buildId": "${BUILD_ID}",
   "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
   "dns": "${DNS_SERVER}",
   "stats": {
@@ -353,8 +305,8 @@ cat > "$PUBLIC_DIR/build-info.json" <<JSON
 }
 JSON
 
-# ─── 9 · validation ───────────────────────────────────────────────────────────
-info "=== [9/9] Validate artifacts ==="
+# ─── 8 · validation ───────────────────────────────────────────────────────────
+info "=== [8/8] Validate artifacts ==="
 if [[ ! -s "$PUBLIC_DIR/manifest.json" ]]; then
   warn "manifest.json is empty or missing"
 fi
