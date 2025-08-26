@@ -1,50 +1,67 @@
 #!/usr/bin/env node
-/**
- * scripts/gen-mitm-loader.js
- * ------------------------------------------------------------
- *    manifest.json ─→ apps/loader/public/scripts/mitm-loader.js
- *
- * The generated JS:
- *   • decodes each base-64 payload
- *   • executes in order (top → bottom)
- *   • logs success / failure so you can tail the MITM console
+/*
+ * Regenerate MITM payload-loader (for Shadowrocket / Stash script-injection)
+ * -------------------------------------------------------------------------
+ * ‣ Reads   : apps/loader/public/manifest.json  (array of *.js.b64 names)
+ * ‣ Writes  : apps/loader/public/scripts/mitm-loader.js
+ * ‣ Runtime : CommonJS – no "type": "module" required.
  */
+'use strict';
+
 const fs   = require('fs');
 const path = require('path');
 
-const ROOT        = path.resolve(__dirname, '..');
-const MANIFEST    = path.join(ROOT, 'apps/loader/public/manifest.json');
-const OUTDIR      = path.join(ROOT, 'apps/loader/public/scripts');
-const OUTFILE     = path.join(OUTDIR, 'mitm-loader.js');
-const CDN_BASE    = 'https://popdeuxrem.github.io/shadow-scripts/obfuscated/'; // adjust if custom domain
+/* ---------- Paths ---------- */
+const ROOT        = path.join(__dirname, '..');
+const PUBLIC_DIR  = path.join(ROOT, 'apps', 'loader', 'public');
+const MANIFEST    = path.join(PUBLIC_DIR, 'manifest.json');
+const OUT_DIR     = path.join(PUBLIC_DIR, 'scripts');
+const OUT_FILE    = path.join(OUT_DIR, 'mitm-loader.js');
 
-/* ── read manifest ────────────────────────────────────────── */
-if (!fs.existsSync(MANIFEST)) {
-  console.error('manifest.json not found, skip mitm-loader generation');
-  process.exit(0);
+/* ---------- Load manifest ---------- */
+let names = [];
+try {
+  names = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'))
+            .filter(f => f.endsWith('.js.b64'))
+            .map(f => f.replace(/\.js\.b64$/, ''));
+} catch (e) {
+  console.error('✖  Cannot read manifest:', e.message);
+  process.exit(1);
 }
-const files = JSON.parse(fs.readFileSync(MANIFEST, 'utf8')) || [];
-if (!files.length) {
-  console.error('manifest empty, skip mitm-loader generation');
-  process.exit(0);
+
+if (!names.length) {
+  console.error('✖  Manifest empty – nothing to write.');
+  process.exit(1);
 }
 
-/* ── template ─────────────────────────────────────────────── */
-const loader = `// Auto-generated — DO NOT EDIT
-(function(){const list=${JSON.stringify(files, null, 0)};
-const base="${CDN_BASE}";
-function log(msg){console.log("[MITM]",msg);}
-(async()=>{for(const f of list){
-  const url=base+f;
-  try{
-    const res=await fetch(url);if(!res.ok)throw new Error(res.status);
-    const decoded=atob(await res.text());
-    (0,eval)(decoded);
-    log("✓ injected "+f);
-  }catch(e){log("✗ "+f+" -> "+e.message);}
-}})();})();`;
+/* ---------- Template ---------- */
+const tpl = `/**
+ * Auto-generated MITM payload loader  – DO NOT EDIT
+ * Manifest size: ${names.length}  •  Generated: ${new Date().toISOString()}
+ * -------------------------------------------------------------- */
+(function(){'use strict';
+  const base = new URL('./obfuscated/', location.origin + location.pathname);
+  const list = ${JSON.stringify(names)};               // from manifest.json
 
-/* ── write ────────────────────────────────────────────────── */
-fs.mkdirSync(OUTDIR, { recursive: true });
-fs.writeFileSync(OUTFILE, loader);
-console.log('✓ mitm-loader.js →', path.relative(ROOT, OUTFILE));
+  function log(msg){try{console.log('[mitm]', msg);}catch(_){}}
+
+  async function inject(name){
+    const url = base + name + '.js.b64';
+    try{
+      const res = await fetch(url);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      const code = atob((await res.text()).trim());
+      const s = document.createElement('script');
+      s.textContent = code;
+      document.documentElement.appendChild(s);
+      log('✓ '+name);
+    }catch(err){ log('✗ '+name+'  '+err.message); }
+  }
+
+  Promise.all(list.map(inject)).then(()=>log('All payloads processed.'));
+})();`;
+
+/* ---------- Write file ---------- */
+fs.mkdirSync(OUT_DIR, { recursive: true });
+fs.writeFileSync(OUT_FILE, tpl);
+console.log(`✔︎  Wrote ${OUT_FILE}  (${names.length} payloads)`);

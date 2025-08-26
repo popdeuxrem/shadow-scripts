@@ -1,17 +1,20 @@
 {
   "name": "stealth-proxy-monorepo",
   "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
-    "lint": "echo \"No lint script configured\"",
-    "test": "echo \"No tests specified\""
+    "build": "bash scripts/build-all.sh",
+    "start": "pnpm run build",
+    "test": "echo \"(no tests)\"",
+    "lint": "echo \"(no linter)\""
   },
   "devDependencies": {
-    "@types/js-yaml": "^4.0.9",
     "javascript-obfuscator": "^4.1.1",
     "js-yaml": "^4.1.0",
     "plist": "^3.1.0",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.2",
     "uuid": "^11.1.0"
   },
   "packageManager": "pnpm@9.7.0"

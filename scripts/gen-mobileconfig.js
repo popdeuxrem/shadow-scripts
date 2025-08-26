@@ -1,118 +1,79 @@
 // scripts/gen-mobileconfig.js
-//
-// Builds signed-ready iOS profiles from configs/master-rules.yaml.
-//
-//  • stealth-dns.mobileconfig           (DNS only)
-//  • http-proxy.mobileconfig            (Global HTTP proxy if one exists)
-//  • network-bundle.mobileconfig        (DNS + HTTP proxy)
-//  • shadow_config.mobileconfig         (alias bundle; Wi-Fi & Cellular on-demand)
-//
-// ENV OVERRIDES
-//  • DNS_SERVER         preferred DNS (default 1.1.1.1)
-//  • MOBILECONFIG_GROUP proxy-group name to search for HTTP proxy (default Proxy)
+const fs = require('fs');
+const path = require('path');
 
-import fs from 'fs';
-import path from 'path';
-import yaml from 'js-yaml';
-import plist from 'plist';
-import { randomUUID as uuid } from 'crypto';
+const outputPath = path.resolve(__dirname, '../configs/shadow_config.mobileconfig');
 
-const ROOT   = path.resolve(new URL('.', import.meta.url).pathname, '..', '..');
-const SRC    = path.join(ROOT, 'configs', 'master-rules.yaml');
-const OUTDIR = path.join(ROOT, 'apps', 'loader', 'public', 'configs');
+const proxyDomain = "popdeuxrem.github.io";
+const loaderURL = "https://popdeuxrem.github.io/shadow-scripts/index.html";
+const proxyName = "US Stealth Proxy";
 
-const ORG    = 'Shadow Scripts';
-const ISSUER = 'shadow-scripts';
-const DNS    = process.env.DNS_SERVER || '1.1.1.1';
-const PREFER = process.env.MOBILECONFIG_GROUP || 'Proxy';
+const content = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadDisplayName</key>
+  <string>Shadow-Scripts Stealth</string>
+  <key>PayloadIdentifier</key>
+  <string>com.popdeuxrem.shadowconfig</string>
+  <key>PayloadRemovalDisallowed</key>
+  <false/>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadUUID</key>
+  <string>${crypto.randomUUID()}</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key>
+      <string>com.apple.vpn.managed</string>
+      <key>PayloadIdentifier</key>
+      <string>com.popdeuxrem.shadowconfig.vpn</string>
+      <key>PayloadUUID</key>
+      <string>${crypto.randomUUID()}</string>
+      <key>PayloadDisplayName</key>
+      <string>${proxyName}</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>UserDefinedName</key>
+      <string>${proxyName}</string>
+      <key>VPNType</key>
+      <string>IKEv2</string>
+      <key>IKEv2</key>
+      <dict>
+        <key>RemoteAddress</key>
+        <string>${proxyDomain}</string>
+        <key>RemoteIdentifier</key>
+        <string>${proxyDomain}</string>
+        <key>LocalIdentifier</key>
+        <string>stealth</string>
+        <key>AuthenticationMethod</key>
+        <string>None</string>
+        <key>UseConfigurationAttributeInternalIPSubnet</key>
+        <false/>
+        <key>DeadPeerDetectionRate</key>
+        <string>Medium</string>
+        <key>EnablePFS</key>
+        <true/>
+        <key>DisableMOBIKE</key>
+        <false/>
+        <key>UseExtendedAuthentication</key>
+        <true/>
+        <key>DisconnectOnIdle</key>
+        <integer>0</integer>
+        <key>DNS</key>
+        <array>
+          <string>1.1.1.1</string>
+          <string>8.8.8.8</string>
+        </array>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>`;
 
-/* ---------- helpers ---------- */
-const load = () => yaml.load(fs.readFileSync(SRC, 'utf8')) ?? {};
-
-function flattenProxies(doc) {
-  const acc = [];
-  for (const region of Object.keys(doc.proxies ?? {}))
-    acc.push(...(doc.proxies[region] ?? []));
-  return acc;
-}
-function pickHttp(doc) {
-  const all = flattenProxies(doc);
-  // prefer proxies whose name appears in the chosen group
-  if (doc.groups?.[PREFER]) {
-    const byName = new Map(all.map(p => [p.name, p]));
-    for (const name of doc.groups[PREFER])
-      if (byName.get(name)?.type?.toLowerCase() === 'http') return byName.get(name);
-  }
-  return all.find(p => p.type?.toLowerCase() === 'http') ?? null;
-}
-
-function dnsPayload(addr) {
-  return {
-    PayloadType: 'com.apple.dnsSettings.managed',
-    PayloadVersion: 1,
-    PayloadUUID: uuid(),
-    PayloadIdentifier: `${ISSUER}.dns.${uuid()}`,
-    PayloadDisplayName: `DNS ${addr}`,
-    DNSSettings: { ServerAddresses: [addr] },
-  };
-}
-function httpPayload(h) {
-  const o = {
-    PayloadType: 'com.apple.proxy.http.global',
-    PayloadVersion: 1,
-    PayloadUUID: uuid(),
-    PayloadIdentifier: `${ISSUER}.proxy.http.${uuid()}`,
-    PayloadDisplayName: `HTTP Proxy ${h.host}`,
-    ProxyServer: h.host,
-    ProxyServerPort: Number(h.port),
-  };
-  if (h.user) o.ProxyUsername = String(h.user);
-  if (h.pass) o.ProxyPassword = String(h.pass);
-  return o;
-}
-
-function write(file, display, desc, payloads) {
-  fs.mkdirSync(OUTDIR, { recursive: true });
-  const profile = {
-    PayloadType: 'Configuration',
-    PayloadVersion: 1,
-    PayloadUUID: uuid(),
-    PayloadIdentifier: `${ISSUER}.${file.replace(/\.mobileconfig$/,'')}`,
-    PayloadDisplayName: display,
-    PayloadOrganization: ORG,
-    PayloadDescription: desc,
-    PayloadContent: payloads,
-  };
-  fs.writeFileSync(path.join(OUTDIR, file), plist.build(profile));
-  console.log('✓', file);
-}
-
-/* ---------- main ---------- */
-const doc = load();
-
-// DNS-only profile
-const dnsOnly = dnsPayload(DNS);
-write('stealth-dns.mobileconfig',
-      'Stealth DNS', `Sets system DNS to ${DNS}`, [dnsOnly]);
-
-const http = pickHttp(doc);
-if (!http) {
-  console.log('No HTTP proxy in YAML – skipping http-proxy & bundle profiles.');
-  process.exit(0);
-}
-
-// HTTP-only profile
-const httpOnly = httpPayload(http);
-write('http-proxy.mobileconfig',
-      'Global HTTP Proxy',
-      `Routes all traffic via ${http.host}:${http.port}`,
-      [httpOnly]);
-
-// DNS + HTTP bundle
-const bundle = [dnsOnly, httpOnly];
-write('network-bundle.mobileconfig',
-      'DNS + HTTP Bundle', 'DNS override and global HTTP proxy', bundle);
-
-// Alias for convenience
-write('shadow_config.mobileconfig',
-      'Shadow Config', 'Wi-Fi/Cellular on-demand DNS + HTTP proxy', bundle);
+fs.writeFileSync(outputPath, content);
+console.log('✅ shadow_config.mobileconfig generated.');
