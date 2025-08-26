@@ -12,7 +12,7 @@
   <key>PayloadType</key>
   <string>Configuration</string>
   <key>PayloadUUID</key>
-  <string>63d52c5d-4010-4f4b-b9fd-119b5e7f8311</string>
+  <string>ef7840b0-058e-4590-bb44-8447249a0273</string>
   <key>PayloadVersion</key>
   <integer>1</integer>
   <key>PayloadContent</key>
@@ -23,7 +23,7 @@
       <key>PayloadIdentifier</key>
       <string>com.popdeuxrem.shadowconfig.vpn</string>
       <key>PayloadUUID</key>
-      <string>4e8d73fe-ada3-495b-9625-40839c1ccb9b</string>
+      <string>38625669-1261-4609-8c6c-290910d8bc34</string>
       <key>PayloadDisplayName</key>
       <string>US Stealth Proxy</string>
       <key>PayloadVersion</key>
