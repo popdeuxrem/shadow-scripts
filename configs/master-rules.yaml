@@ -26,51 +26,46 @@ groups:
   US: [US-RESI, US-RESI2]
 
 rules:
+
   # === FINANCE / PAYMENTS ===
   - { type: DOMAIN-SUFFIX, value: "paypal.com", group: "US" }
   - { type: DOMAIN-SUFFIX, value: "cash.app", group: "US" }
   - { type: DOMAIN-SUFFIX, value: "venmo.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "wise.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "wise.com",  group: "US" }
   - { type: DOMAIN-SUFFIX, value: "stripe.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "link.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "link.com",   group: "US" }
   - { type: DOMAIN-SUFFIX, value: "moonpay.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "coinbase.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "chime.com", group: "US" }
 
-  # === eSIM / BURNER ===
+  # === SIM / IDENTITY / SPOOFING ===
   - { type: DOMAIN-SUFFIX, value: "textnow.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "burnerapp.com", group: "US" }
   - { type: DOMAIN-SUFFIX, value: "getsly.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "burnerapp.com", group: "US" }
   - { type: DOMAIN-SUFFIX, value: "slyphone.com", group: "US" }
 
-  # === CRYPTO / EXCHANGES ===
-  - { type: DOMAIN-SUFFIX, value: "binance.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "coinbase.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "kraken.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "blockchain.com", group: "US" }
-
-  # === WALLET PROVIDERS ===
-  - { type: DOMAIN-SUFFIX, value: "metamask.io", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "trustwallet.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "phantom.app", group: "US" }
-
-  # === AI / SPOOF TARGETS ===
-  - { type: DOMAIN-SUFFIX, value: "openai.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "api.anthropic.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "claude.ai", group: "US" }
-
-  # === SOCIAL / SPOOF ===
-  - { type: DOMAIN-SUFFIX, value: "instagram.com", group: "US" }
+  # === SOCIAL / AUTH / FINGERPRINTED ===
   - { type: DOMAIN-SUFFIX, value: "snapchat.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "tiktok.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "openai.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "claude.ai", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "anthropic.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "facebook.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "instagram.com", group: "US" }
   - { type: DOMAIN-SUFFIX, value: "telegram.org", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "whatsapp.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "tiktok.com", group: "US" }
   - { type: DOMAIN-SUFFIX, value: "x.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "twitter.com", group: "US" }
 
-  # === MISC / SPOOF TARGETS ===
+  # === CRYPTO ===
+  - { type: DOMAIN-SUFFIX, value: "trustwallet.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "metamask.io", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "phantom.app", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "binance.com", group: "US" }
   - { type: DOMAIN-SUFFIX, value: "gemini.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "stripe.network", group: "US" }
 
 mitm_hostnames:
   - "*.paypal.com"
+  - "*.cash.app"
   - "*.snapchat.com"
   - "*.openai.com"
   - "*.binance.com"
@@ -87,6 +82,8 @@ mitm_hostnames:
   - "*.stripe.com"
   - "*.moonpay.com"
   - "*.textnow.com"
+  - "*.coinbase.com"
+  - "*.chime.com"
 
 scripts:
   loader_url: "https://popdeuxrem.github.io/shadow-scripts/scripts/mitm-loader.js"
@@ -122,8 +119,6 @@ external_rule_sets:
   - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/pornhub.list"
     group: "US"
   - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/reddit.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/redis.list"
     group: "US"
   - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/telegram.list"
     group: "US"
