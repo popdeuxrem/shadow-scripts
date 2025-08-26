@@ -1,8 +1,14 @@
 // scripts/gen-mobileconfig.js
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto'); // Added the missing crypto import
 
-const outputPath = path.resolve(__dirname, '../configs/shadow_config.mobileconfig');
+// Update the output path to match build-all.sh's expected structure
+const outputDir = path.resolve(__dirname, '../apps/loader/public/configs');
+// Create the directory if it doesn't exist
+fs.mkdirSync(outputDir, { recursive: true });
+
+const outputPath = path.resolve(outputDir, 'shadow_config.mobileconfig');
 
 const proxyDomain = "popdeuxrem.github.io";
 const loaderURL = "https://popdeuxrem.github.io/shadow-scripts/index.html";
