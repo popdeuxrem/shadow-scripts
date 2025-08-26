@@ -1,0 +1,86 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'apps/loader/public/**'  # Avoid circular triggers
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+env:
+  DNS_SERVER: 1.1.1.1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Build & Obfuscate
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'pnpm'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 8
+          run_install: false
+
+      - name: Setup build cache
+        uses: actions/cache@v4
+        with:
+          path: .build-cache
+          key: ${{ runner.os }}-build-cache-${{ hashFiles('src-scripts/**/*.js') }}
+          restore-keys: |
+            ${{ runner.os }}-build-cache-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile || pnpm install
+
+      - name: Build all
+        run: |
+          chmod +x scripts/build-all.sh
+          ./scripts/build-all.sh
+        env:
+          BUILD_VERSION: ${{ github.run_id }}-${{ github.run_number }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: apps/loader/public/
+          retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    name: Deploy to GitHub Pages
+    
+    steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: ./public
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+        
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './public'
+          
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
