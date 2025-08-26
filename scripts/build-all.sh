@@ -43,20 +43,6 @@ get_cpu_count() {
 PARALLEL_JOBS=$(get_cpu_count)
 [[ $PARALLEL_JOBS -gt 1 ]] && PARALLEL_JOBS=$((PARALLEL_JOBS - 1))
 
-# Find optimal obfuscator
-obf_cmd() {
-  if have npx; then 
-    echo "npx --yes javascript-obfuscator"
-    return
-  fi
-  if have pnpm; then 
-    echo "pnpm dlx javascript-obfuscator" 
-    return
-  fi
-  die "javascript-obfuscator CLI not available (install dev-dep in package.json)"
-}
-OBF="$(obf_cmd)"
-
 # Base64 encode with platform detection
 b64_encode() {
   if [[ "$(uname)" == "Darwin" ]]; then
@@ -82,26 +68,33 @@ run_if() {
   fi
 }
 
-# Check for required Node.js modules
-check_node_modules() {
-  local modules=("js-yaml" "javascript-obfuscator")
-  for module in "${modules[@]}"; do
-    if ! node -e "try { require.resolve('${module}'); } catch(e) { process.exit(1); }" 2>/dev/null; then
-      warn "Missing Node.js module: ${module}"
-      if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-        info "Installing missing module in GitHub Actions..."
-        npm install -g "${module}" || die "Failed to install ${module}"
-      else
-        die "Please install missing module: npm install -g ${module}"
-      fi
-    fi
-  done
+# ─── Install required tools ───────────────────────────────────────────────────
+ensure_js_obfuscator() {
+  info "Ensuring javascript-obfuscator is available..."
+  
+  # Try to install javascript-obfuscator globally with npm if needed
+  if ! have javascript-obfuscator; then
+    info "Installing javascript-obfuscator globally..."
+    npm install -g javascript-obfuscator || {
+      warn "Failed to install javascript-obfuscator globally"
+      return 1
+    }
+  fi
+  
+  # Verify installation
+  if have javascript-obfuscator; then
+    success "javascript-obfuscator is available"
+    return 0
+  else
+    warn "javascript-obfuscator still not available after installation attempt"
+    return 1
+  fi
 }
 
 # ─── 1 · prepare ───────────────────────────────────────────────────────────────
 info "=== [1/9] Preparing environment ==="
 mkdir -p "$CACHE_DIR"
-check_node_modules
+ensure_js_obfuscator || die "javascript-obfuscator is required for this script"
 node --version >/dev/null || die "Node.js unavailable"
 
 # ─── 2 · clean ────────────────────────────────────────────────────────────────
@@ -166,13 +159,8 @@ else
     
     info "Processing: $base"
     
-    # Create temporary directory for each file
-    tmp_dir=$(mktemp -d)
-    tmp_js="$tmp_dir/$base"
-    cp "$JS" "$tmp_js"
-    
-    # Run obfuscator with error handling
-    if "$OBF" "$tmp_js" --output "$obf" \
+    # Direct use of javascript-obfuscator command-line interface
+    if javascript-obfuscator "$JS" --output "$obf" \
       --compact true \
       --self-defending true \
       --control-flow-flattening true \
@@ -202,8 +190,7 @@ else
       FAILED=$((FAILED + 1))
     fi
     
-    # Clean up temporary files
-    rm -rf "$tmp_dir"
+    # Clean up obfuscated file
     rm -f "$obf"
   done
 fi
