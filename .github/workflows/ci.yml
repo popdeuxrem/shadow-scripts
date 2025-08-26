@@ -3,84 +3,54 @@ name: Build & Deploy
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'apps/loader/public/**'  # Avoid circular triggers
   workflow_dispatch:
-
-permissions:
-  contents: write
-  pages: write
-  id-token: write
 
 env:
   DNS_SERVER: 1.1.1.1
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    name: Build & Obfuscate
+    name: Build & Obfuscate + Deploy
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
         with:
-          node-version: 18
-          cache: 'pnpm'
+          persist-credentials: false  # we'll use PAT or GITHUB_TOKEN manually
 
       - name: Install pnpm
         uses: pnpm/action-setup@v3
         with:
           version: 8
-          run_install: false
 
-      - name: Setup build cache
-        uses: actions/cache@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          path: .build-cache
-          key: ${{ runner.os }}-build-cache-${{ hashFiles('src-scripts/**/*.js') }}
-          restore-keys: |
-            ${{ runner.os }}-build-cache-
+          node-version: 18
+          cache: 'pnpm'  # Now this works because pnpm is installed first
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile || pnpm install
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build all
         run: |
           chmod +x scripts/build-all.sh
           ./scripts/build-all.sh
-        env:
-          BUILD_VERSION: ${{ github.run_id }}-${{ github.run_number }}
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-output
-          path: apps/loader/public/
-          retention-days: 7
+      - name: Commit & push generated files
+        run: |
+          git config user.name "gh-actions"
+          git config user.email "actions@github.com"
+          git add apps/loader/public
+          git commit -m "🔁 Auto-update obfuscated scripts + configs" || echo "No changes to commit"
+          git push origin main
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    name: Deploy to GitHub Pages
-    
-    steps:
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
+      - name: Deploy to GitHub Pages (gh-pages branch)
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          name: build-output
-          path: ./public
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-        
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: './public'
-          
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./apps/loader/public
+          publish_branch: gh-pages
+          force_orphan: true  # clean history
