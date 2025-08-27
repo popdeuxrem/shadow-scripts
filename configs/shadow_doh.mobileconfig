@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>PayloadType</key><string>Configuration</string>
+  <key>PayloadVersion</key><integer>1</integer>
+  <key>PayloadIdentifier</key><string>com.popdeuxrem.shadow.doh</string>
+  <key>PayloadUUID</key><string>1ff1f15e-9f44-4967-9126-b1406aac84bc</string>
+  <key>PayloadDisplayName</key><string>Shadow-Scripts • Cloudflare DoH</string>
+  <key>PayloadOrganization</key><string>popdeuxrem</string>
+  <key>PayloadDescription</key>
+  <string>Installs DNS over HTTPS using Cloudflare (1.1.1.1). No VPN payload.</string>
+  <key>PayloadContent</key>
+  <array>
+    
+    <dict>
+      <key>PayloadType</key><string>com.apple.dnsSettings.managed</string>
+      <key>PayloadVersion</key><integer>1</integer>
+      <key>PayloadIdentifier</key><string>com.popdeuxrem.shadow.doh.doh</string>
+      <key>PayloadUUID</key><string>45a9be43-b9a8-4862-be74-65b3267c72b4</string>
+      <key>PayloadDisplayName</key><string>Shadow-Scripts • Cloudflare DoH</string>
+      <key>PayloadOrganization</key><string>popdeuxrem</string>
+      <key>ProhibitDisablement</key><false/>
+      <key>DNSSettings</key>
+      <dict>
+        <key>DNSProtocol</key><string>HTTPS</string>
+        <key>ServerURL</key><string>https://cloudflare-dns.com/dns-query</string>
+        <key>ServerName</key><string>cloudflare-dns.com</string>
+        <key>ServerAddresses</key>
+        <array><string>1.1.1.1</string><string>1.0.0.1</string></array>
+      </dict>
+    </dict>
+  </array>
+</dict></plist>

