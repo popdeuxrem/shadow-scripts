@@ -1,115 +1,93 @@
-name: 🛠️ Build & Deploy — Shadow Scripts
+# A clear, descriptive name for the workflow
+name: 🛠️ Build, Test & Deploy — Shadow Scripts
 
+# --- Workflow Triggers ---
 on:
+  # Run on pushes to the 'main' branch if specific files have changed
   push:
     branches: [main]
     paths:
       - 'src-scripts/**'
       - 'scripts/**'
       - 'configs/master-rules.yaml'
-      - 'scripts/manifest-loader.html'
       - 'package.json'
       - 'pnpm-lock.yaml'
+  # Allow manual runs from the GitHub Actions UI
   workflow_dispatch:
     inputs:
       force_rebuild:
-        description: 'Force full rebuild (ignore cache)'
+        description: 'Force a full rebuild and ignore the cache'
         type: boolean
         default: false
 
+# --- Concurrency Control ---
+# Ensures only one workflow runs at a time for the same branch, canceling older runs.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: write
-  pages: write
-  id-token: write
-
+# --- Environment Variables ---
+# Centralized configuration available to all jobs
 env:
   DNS_SERVER: "1.1.1.1"
   DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-  CACHE_KEY_PREFIX: shadow-scripts-v1
-  NODE_OPTIONS: "--max-old-space-size=4096"
+  NODE_OPTIONS: "--max-old-space-size=4096" # Increase Node.js memory limit
+  PNPM_VERSION: "9.7.0"
 
+# --- Jobs ---
 jobs:
+  # Job 1: Build the project assets
   build:
+    name: 🏗️ Build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Grant only the permissions this job needs
+    permissions:
+      contents: read
     outputs:
-      sha_short: ${{ steps.sha.outputs.sha_short }}
-      cache_hit: ${{ steps.build-cache.outputs.cache-hit }}
+      sha_short: ${{ steps.vars.outputs.sha_short }}
+      cache_key: ${{ steps.cache_logic.outputs.key }}
+      cache_hit: ${{ steps.cache_restore.outputs.cache-hit }}
     
     steps:
-      - name: ⬇️ Checkout
+      - name: ⬇️ Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
 
-      - name: 🔑 Generate metadata
-        id: sha
-        run: |
-          echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          echo "date_tag=$(date +'%Y%m%d')" >> "$GITHUB_OUTPUT"
+      - name: 📝 Generate build metadata
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: 🏗️ Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.7.0
-          run_install: false
-
-      - name: 🛠️ Setup Node.js
+      - name: 🛠️ Setup Node.js & pnpm
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: pnpm
-
+          node-version: '22'
+          cache: 'pnpm'
+          
       - name: 📦 Install dependencies
         run: pnpm install --frozen-lockfile --prefer-offline
 
+      - name: 🧠 Define cache key
+        id: cache_logic
+        run: |
+          # The key combines hashes of critical source files
+          CACHE_KEY="build-artifacts-${{ runner.os }}-${{ hashFiles('src-scripts/**', 'scripts/build-all.sh', 'configs/master-rules.yaml') }}"
+          echo "key=${CACHE_KEY}" >> "$GITHUB_OUTPUT"
+
       - name: 🔍 Restore build cache
-        id: build-cache
+        id: cache_restore
         if: ${{ !inputs.force_rebuild }}
         uses: actions/cache@v4
         with:
           path: apps/loader/public
-          key: ${{ env.CACHE_KEY_PREFIX }}-${{ hashFiles('src-scripts/**', 'scripts/**', 'configs/master-rules.yaml', 'scripts/manifest-loader.html') }}-${{ steps.sha.outputs.date_tag }}
-          restore-keys: |
-            ${{ env.CACHE_KEY_PREFIX }}-
-
-      - name: 🔨 Obfuscate & Build
-        if: ${{ steps.build-cache.outputs.cache-hit != 'true' || inputs.force_rebuild }}
+          key: ${{ steps.cache_logic.outputs.key }}
+          
+      - name: 🔨 Obfuscate & Build artifacts
+        # Run only if the cache was missed or a force rebuild was requested
+        if: steps.cache_restore.outputs.cache-hit != 'true' || inputs.force_rebuild
         run: |
           chmod +x scripts/build-all.sh
           ./scripts/build-all.sh
           cp scripts/manifest-loader.html apps/loader/public/index.html
-
-      - name: 🧪 Validate artifacts
-        run: |
-          [ -d apps/loader/public ] || { echo "❌ public dir missing"; exit 1; }
-
-          EMPTY=$(find apps/loader/public -type f \( -name '*.js' -o -name '*.json' \) -empty || true)
-          if [ -n "$EMPTY" ]; then
-            echo "❌ Empty file(s):"
-            echo "$EMPTY"
-            exit 1
-          fi
-
-          echo "Last updated: $(date -u)" > apps/loader/public/build-info.txt
-          echo "Commit: ${{ steps.sha.outputs.sha_short }}" >> apps/loader/public/build-info.txt
-
-      - name: 📝 Auto-commit artifacts
-        if: ${{ steps.build-cache.outputs.cache-hit != 'true' || inputs.force_rebuild }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git add .
-          git diff --cached --quiet || {
-            git commit -m "🤖 Build artifacts [skip ci]" -m "Build: ${{ steps.sha.outputs.sha_short }}"
-            git pull --rebase origin main || true
-            git push origin main || true
-          }
 
       - name: 📦 Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -117,10 +95,66 @@ jobs:
           path: apps/loader/public
           retention-days: 7
 
+  # Job 2: Post-build actions like committing artifacts
+  post-build:
+    name: 📝 Commit & Validate
+    # This job runs only if the build job generated new artifacts
+    if: needs.build.outputs.cache_hit != 'true' || inputs.force_rebuild
+    needs: build
+    runs-on: ubuntu-latest
+    # This job requires write permissions to push to the repository
+    permissions:
+      contents: write
+      
+    steps:
+      - name: ⬇️ Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 📥 Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: apps/loader/public
+          
+      - name: 🧪 Validate artifacts
+        run: |
+          echo "Validating artifact contents..."
+          [ -d apps/loader/public ] || { echo "❌ 'public' directory is missing!"; exit 1; }
+          EMPTY_FILES=$(find apps/loader/public -type f -empty)
+          if [[ -n "$EMPTY_FILES" ]]; then
+            echo "❌ Found empty files in artifact:"
+            echo "$EMPTY_FILES"
+            exit 1
+          fi
+          echo "✅ Artifacts are valid."
+          echo "Last updated: $(date -u --iso-8601=seconds)" > apps/loader/public/build-info.txt
+          echo "Commit: ${{ needs.build.outputs.sha_short }}" >> apps/loader/public/build-info.txt
+
+      - name: 🤖 Commit and push artifacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/loader/public/
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(build): Generate artifacts [skip ci]" -m "Source commit: ${{ needs.build.outputs.sha_short }}"
+            git pull --rebase
+            git push
+          else
+            echo "No changes to commit."
+          fi
+
+  # Job 3: Deploy the built assets to GitHub Pages
   deploy:
+    name: 🚀 Deploy
+    # This job runs after the build job, regardless of whether post-build runs
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # Grant only the permissions required for deployment
+    permissions:
+      pages: write
+      id-token: write
+      
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -130,10 +164,13 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-      - name: 📢 Discord Notify
-        if: ${{ success() && env.DISCORD_WEBHOOK != '' }}
+      - name: 📢 Send Discord notification
+        if: success() && env.DISCORD_WEBHOOK != ''
         run: |
-          CACHE_STATUS="${{ needs.build.outputs.cache_hit == 'true' && '(cached)' || '(rebuilt)' }}"
+          CACHE_STATUS=$([[ "${{ needs.build.outputs.cache_hit }}" == 'true' ]] && echo '(cached)' || echo '(rebuilt)')
+          PAGE_URL="${{ steps.deployment.outputs.page_url }}"
+          MESSAGE_CONTENT="✅ Shadow Scripts ${CACHE_STATUS} build ${{ needs.build.outputs.sha_short }} deployed: ${PAGE_URL}"
+          
           curl -H "Content-Type: application/json" -X POST \
-            -d "{\"content\":\"✅ Shadow Scripts ${CACHE_STATUS} build ${{ needs.build.outputs.sha_short }} deployed: ${{ steps.deployment.outputs.page_url }}\"}" \
-            "$DISCORD_WEBHOOK" || true
+            -d "{\"content\":\"${MESSAGE_CONTENT}\"}" \
+            "${DISCORD_WEBHOOK}" || echo "⚠️ Discord notification failed, but deployment succeeded."
