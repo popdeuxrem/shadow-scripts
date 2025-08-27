@@ -1,67 +1,99 @@
-#!/usr/bin/env node
-/*
- * Regenerate MITM payload-loader (for Shadowrocket / Stash script-injection)
- * -------------------------------------------------------------------------
- * ‣ Reads   : apps/loader/public/manifest.json  (array of *.js.b64 names)
- * ‣ Writes  : apps/loader/public/scripts/mitm-loader.js
- * ‣ Runtime : CommonJS – no "type": "module" required.
- */
-'use strict';
+// scripts/gen-mitm-loader.js
+const fs = require("fs");
+const path = require("path");
 
-const fs   = require('fs');
-const path = require('path');
+const OUTPUT = path.resolve(__dirname, "../apps/loader/public/scripts/mitm-loader.js");
 
-/* ---------- Paths ---------- */
-const ROOT        = path.join(__dirname, '..');
-const PUBLIC_DIR  = path.join(ROOT, 'apps', 'loader', 'public');
-const MANIFEST    = path.join(PUBLIC_DIR, 'manifest.json');
-const OUT_DIR     = path.join(PUBLIC_DIR, 'scripts');
-const OUT_FILE    = path.join(OUT_DIR, 'mitm-loader.js');
-
-/* ---------- Load manifest ---------- */
-let names = [];
-try {
-  names = JSON.parse(fs.readFileSync(MANIFEST, 'utf8'))
-            .filter(f => f.endsWith('.js.b64'))
-            .map(f => f.replace(/\.js\.b64$/, ''));
-} catch (e) {
-  console.error('✖  Cannot read manifest:', e.message);
-  process.exit(1);
-}
-
-if (!names.length) {
-  console.error('✖  Manifest empty – nothing to write.');
-  process.exit(1);
-}
-
-/* ---------- Template ---------- */
-const tpl = `/**
- * Auto-generated MITM payload loader  – DO NOT EDIT
- * Manifest size: ${names.length}  •  Generated: ${new Date().toISOString()}
- * -------------------------------------------------------------- */
-(function(){'use strict';
-  const base = new URL('./obfuscated/', location.origin + location.pathname);
-  const list = ${JSON.stringify(names)};               // from manifest.json
-
-  function log(msg){try{console.log('[mitm]', msg);}catch(_){}}
-
-  async function inject(name){
-    const url = base + name + '.js.b64';
-    try{
-      const res = await fetch(url);
-      if(!res.ok) throw new Error('HTTP '+res.status);
-      const code = atob((await res.text()).trim());
-      const s = document.createElement('script');
-      s.textContent = code;
-      document.documentElement.appendChild(s);
-      log('✓ '+name);
-    }catch(err){ log('✗ '+name+'  '+err.message); }
+// Minimal query string parser for mobile JS engines
+function parseQuery(url) {
+  const out = {};
+  const q = url.indexOf("?") !== -1 ? url.split("?")[1] : "";
+  if (q) {
+    q.split("&").forEach(kv => {
+      const [k, v] = kv.split("=");
+      out[decodeURIComponent(k)] = v ? decodeURIComponent(v) : "";
+    });
   }
+  return out;
+}
 
-  Promise.all(list.map(inject)).then(()=>log('All payloads processed.'));
-})();`;
+const loader = `/*
+ * MITM Payload Loader (Mobile/Shadowrocket-safe)
+ * Generated: ${(new Date()).toISOString()}
+ * Auto-injects base64 payload(s) by ?inject=foo.js,bar.js or #inject=all
+ */
 
-/* ---------- Write file ---------- */
-fs.mkdirSync(OUT_DIR, { recursive: true });
-fs.writeFileSync(OUT_FILE, tpl);
-console.log(`✔︎  Wrote ${OUT_FILE}  (${names.length} payloads)`);
+let log = (msg) => { try { console.log("[LOADER] " + msg); } catch {} };
+let injected = [];
+
+function parseQuery(url) {
+  let out = {};
+  let q = url.indexOf("?") !== -1 ? url.split("?")[1] : "";
+  if (q) {
+    q.split("&").forEach(kv => {
+      let [k, v] = kv.split("=");
+      out[decodeURIComponent(k)] = v ? decodeURIComponent(v) : "";
+    });
+  }
+  return out;
+}
+
+function getInjectList(url, hash) {
+  let q = parseQuery(url || "");
+  let inject = q.inject || "";
+  if (!inject && hash && hash.startsWith("#inject="))
+    inject = decodeURIComponent(hash.slice(8));
+  if (!inject) return [];
+  return inject.trim().toLowerCase() === "all"
+    ? ["__ALL__"]
+    : inject.split(",").map(x => x.trim()).filter(Boolean);
+}
+
+async function injectPayload(name, base) {
+  // Only .js payloads
+  if (!/^[\\w.-]+\\.js$/.test(name)) { log("Rejected unsafe name " + name); return; }
+  const url = base + name + ".b64";
+  try {
+    log("Fetching " + url);
+    const r = await fetch(url, {cache: "no-cache"});
+    if (!r.ok) { log("HTTP " + r.status); return; }
+    const txt = (await r.text()).trim();
+    if (!txt) { log("Empty payload: " + name); return; }
+    const s = document.createElement("script");
+    s.textContent = atob(txt);
+    document.documentElement.appendChild(s);
+    log("Injected " + name);
+    injected.push(name);
+  } catch(e) { log("Fetch failed: " + e); }
+}
+
+(async function () {
+  try {
+    // Shadowrocket/Loon/Quantumult X-safe: use string logic for URLs
+    const href = typeof location !== "undefined" ? location.href : (typeof $request !== "undefined" ? $request.url : "");
+    const hash = typeof location !== "undefined" ? location.hash : "";
+    const base = href.replace(/\\/[^/]*$/, "/obfuscated/");
+    const manifestURL = base.replace(/\\/obfuscated\\/$/, "/manifest.json");
+    log("Manifest: " + manifestURL);
+    const r = await fetch(manifestURL, {cache: "no-cache"});
+    const arr = r.ok ? await r.json() : [];
+    const files = arr.filter(f => f.endsWith(".js.b64")).map(f => f.replace(/\\.js\\.b64$/, ".js"));
+    log("Payloads: " + files.length);
+    // Parse targets
+    const list = getInjectList(href, hash);
+    let targets = [];
+    if (list.length && list[0] === "__ALL__") {
+      targets = files;
+      log("Auto-inject: all (" + files.length + ")");
+    } else if (list.length) {
+      targets = files.filter(f => list.includes(f));
+      log("Auto-inject: " + targets.join(","));
+    }
+    for (const n of targets) await injectPayload(n, base);
+  } catch(e) { log("Loader error: " + e); }
+})();
+`;
+
+fs.mkdirSync(path.dirname(OUTPUT), { recursive: true });
+fs.writeFileSync(OUTPUT, loader);
+console.log("✅ mitm-loader.js generated");
