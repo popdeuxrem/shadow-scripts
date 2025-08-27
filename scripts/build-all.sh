@@ -74,12 +74,20 @@ clean() {
 generate_configs() {
   info "Generating Config Files"
   local generated=0
+  local failures=0
   for script in "gen-shadowrocket.js" "gen-stash.js" "gen-loon.js" "gen-mobileconfig.js"; do
     if [[ -f "${SCRIPTS_DIR}/${script}" ]]; then
-      node "${SCRIPTS_DIR}/${script}" && { success "Generated ${script/gen-/}"; ((generated++)); }
+      # Run script but don't exit on failure; log a warning instead.
+      if node "${SCRIPTS_DIR}/${script}"; then
+        success "Generated ${script/gen-/}"
+        ((generated++))
+      else
+        warn "Failed to generate ${script/gen-/}"
+        ((failures++))
+      fi
     fi
   done
-  ((generated == 0)) && warn "No config generation scripts found or run."
+  ((generated == 0)) && ((failures == 0)) && warn "No config generation scripts found or run."
 }
 
 # 4. Process a single JS payload: cache check -> encode -> cache store
