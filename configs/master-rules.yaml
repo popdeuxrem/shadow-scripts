@@ -1,194 +1,203 @@
-# ──────────────────────────────────────────────────────────────
-#  master-rules.yaml   │ authoritative policy for build-all.sh
-#  last-modified: 2025-08-25
-# ──────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# master-rules.yaml | Authoritative Policy for Network Traffic
+#
+# Maintained by: PopdeuxRem
+# Version: 2.0.0
+# Last Modified: 2025-08-27
+# -----------------------------------------------------------------------------
+# This file defines a comprehensive set of rules, proxies, and configurations
+# for use with various network tools. It leverages YAML anchors for
+# maintainability and readability.
+# -----------------------------------------------------------------------------
 
+# --- Definitions & Templates (Anchors) ---
+# Defines reusable components to keep the configuration DRY (Don't Repeat Yourself).
+definitions:
+  groups:
+    us_group: &us_group "US"
+
+  rules:
+    # Template for a standard DOMAIN-SUFFIX rule routing to the US group.
+    us_domain_suffix: &us_domain_suffix
+      type: DOMAIN-SUFFIX
+      group: *us_group
+
+# --- Proxy Server Definitions ---
+# List of all available proxy servers, grouped by region.
 proxies:
   us:
-    - type: socks5
-      name: US-RESI
+    - name: US-RESI
+      type: socks5
       host: 103.210.12.53
       port: 5981
       user: twozpyil
       pass: y4syr3w1dcuz
 
-    - type: vless
-      name: US-RESI2
+    - name: US-RESI2
+      type: vless
       host: premiusa1.vpnjantit.com
       port: 10002
       user: 210fc54a-7ebd-11f0-92b9-072f1c489945
-      tls: true
-      ws: true
-      ws_path: "/vpnjantit"
-      fast_open: false
+      tls: true          # Enable TLS encryption
+      ws: true           # Enable WebSocket transport
+      ws_path: "/vpnjantit" # WebSocket path
+      fast_open: false   # Disable TCP Fast Open
 
+# --- Proxy Group Definitions ---
+# Defines how proxies are grouped for use in rules.
 groups:
   US: [US-RESI, US-RESI2]
 
+# --- Rule Definitions ---
+# Rules are now defined by merging the 'us_domain_suffix' template.
+# This makes adding new domains clean and simple.
 rules:
+  # === Finance / Payments ===
+  - { <<: *us_domain_suffix, value: "paypal.com" }
+  - { <<: *us_domain_suffix, value: "cash.app" }
+  - { <<: *us_domain_suffix, value: "venmo.com" }
+  - { <<: *us_domain_suffix, value: "wise.com" }
+  - { <<: *us_domain_suffix, value: "stripe.com" }
+  - { <<: *us_domain_suffix, value: "link.com" }
+  - { <<: *us_domain_suffix, value: "moonpay.com" }
+  - { <<: *us_domain_suffix, value: "coinbase.com" }
+  - { <<: *us_domain_suffix, value: "chime.com" }
 
-  # === FINANCE / PAYMENTS ===
-  - { type: DOMAIN-SUFFIX, value: "paypal.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "cash.app", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "venmo.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "wise.com",  group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "stripe.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "link.com",   group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "moonpay.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "coinbase.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "chime.com", group: "US" }
+  # === SIM / Identity / Spoofing ===
+  - { <<: *us_domain_suffix, value: "textnow.com" }
+  - { <<: *us_domain_suffix, value: "getsly.com" }
+  - { <<: *us_domain_suffix, value: "burnerapp.com" }
+  - { <<: *us_domain_suffix, value: "slyphone.com" }
 
-  # === SIM / IDENTITY / SPOOFING ===
-  - { type: DOMAIN-SUFFIX, value: "textnow.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "getsly.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "burnerapp.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "slyphone.com", group: "US" }
+  # === Social / Auth / Fingerprinted ===
+  - { <<: *us_domain_suffix, value: "snapchat.com" }
+  - { <<: *us_domain_suffix, value: "openai.com" }
+  - { <<: *us_domain_suffix, value: "claude.ai" }
+  - { <<: *us_domain_suffix, value: "anthropic.com" }
+  - { <<: *us_domain_suffix, value: "facebook.com" }
+  - { <<: *us_domain_suffix, value: "instagram.com" }
+  - { <<: *us_domain_suffix, value: "telegram.org" }
+  - { <<: *us_domain_suffix, value: "tiktok.com" }
+  - { <<: *us_domain_suffix, value: "x.com" }
+  - { <<: *us_domain_suffix, value: "twitter.com" }
 
-  # === SOCIAL / AUTH / FINGERPRINTED ===
-  - { type: DOMAIN-SUFFIX, value: "snapchat.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "openai.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "claude.ai", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "anthropic.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "facebook.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "instagram.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "telegram.org", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "tiktok.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "x.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "twitter.com", group: "US" }
+  # === Crypto ===
+  - { <<: *us_domain_suffix, value: "trustwallet.com" }
+  - { <<: *us_domain_suffix, value: "metamask.io" }
+  - { <<: *us_domain_suffix, value: "phantom.app" }
+  - { <<: *us_domain_suffix, value: "binance.com" }
+  - { <<: *us_domain_suffix, value: "gemini.com" }
 
-  # === CRYPTO ===
-  - { type: DOMAIN-SUFFIX, value: "trustwallet.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "metamask.io", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "phantom.app", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "binance.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "gemini.com", group: "US" }
+  # === OTT / Streaming / Media ===
+  - { <<: *us_domain_suffix, value: "netflix.com" }
+  - { <<: *us_domain_suffix, value: "hulu.com" }
+  - { <<: *us_domain_suffix, value: "disneyplus.com" }
+  - { <<: *us_domain_suffix, value: "primevideo.com" }
+  - { <<: *us_domain_suffix, value: "paramountplus.com" }
+  - { <<: *us_domain_suffix, value: "hbomax.com" }
+  - { <<: *us_domain_suffix, value: "spotify.com" }
+  - { <<: *us_domain_suffix, value: "youtube.com" }
+  - { <<: *us_domain_suffix, value: "twitch.tv" }
 
-  # === OTT / STREAMING / MEDIA SPOOF ===
-  - { type: DOMAIN-SUFFIX, value: "netflix.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "hulu.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "disneyplus.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "primevideo.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "paramountplus.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "hbomax.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "spotify.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "youtube.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "twitch.tv", group: "US" }
+  # === Dating / Social ===
+  - { <<: *us_domain_suffix, value: "tinder.com" }
+  - { <<: *us_domain_suffix, value: "bumble.com" }
+  - { <<: *us_domain_suffix, value: "okcupid.com" }
+  - { <<: *us_domain_suffix, value: "hinge.co" }
+  - { <<: *us_domain_suffix, value: "match.com" }
 
-  # === DATING / SOCIAL SPOOF ===
-  - { type: DOMAIN-SUFFIX, value: "tinder.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "bumble.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "okcupid.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "hinge.co", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "match.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "plentyoffish.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "coffeemeetsbagel.com", group: "US" }
+  # === Mail / Communications ===
+  - { <<: *us_domain_suffix, value: "gmail.com" }
+  - { <<: *us_domain_suffix, value: "outlook.com" }
+  - { <<: *us_domain_suffix, value: "proton.me" }
+  - { <<: *us_domain_suffix, value: "yahoo.com" }
+  - { <<: *us_domain_suffix, value: "icloud.com" }
 
-  # === MAIL / COMMUNICATIONS ===
-  - { type: DOMAIN-SUFFIX, value: "gmail.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "outlook.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "proton.me", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "yahoo.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "icloud.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "mail.com", group: "US" }
+  # === API / Dev / Cloud / AI Services ===
+  - { <<: *us_domain_suffix, value: "github.com" }
+  - { <<: *us_domain_suffix, value: "github.io" }
+  - { <<: *us_domain_suffix, value: "gitlab.com" }
+  - { <<: *us_domain_suffix, value: "dropbox.com" }
+  - { <<: *us_domain_suffix, value: "googleapis.com" }
+  - { <<: *us_domain_suffix, value: "cloudflare.com" }
+  - { <<: *us_domain_suffix, value: "notion.so" }
+  - { <<: *us_domain_suffix, value: "zoom.us" }
+  - { <<: *us_domain_suffix, value: "slack.com" }
 
-  # === API / DEV / CLOUD / AI SERVICES ===
-  - { type: DOMAIN-SUFFIX, value: "github.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "github.io", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "gitlab.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "dropbox.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "dropboxusercontent.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "gdrive.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "googleapis.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "cloudflare.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "openai.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "claude.ai", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "anthropic.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "notion.so", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "zoom.us", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "slack.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "asana.com", group: "US" }
-  - { type: DOMAIN-SUFFIX, value: "figma.com", group: "US" }
-
+# --- MITM Hostnames ---
+# Domains for which Man-in-the-Middle (MITM) should be performed.
+# Sorted alphabetically for easier management.
 mitm_hostnames:
-  - "*.paypal.com"
-  - "*.cash.app"
-  - "*.snapchat.com"
-  - "*.openai.com"
-  - "*.binance.com"
-  - "*.wise.com"
-  - "*.tiktok.com"
-  - "*.instagram.com"
-  - "*.claude.ai"
   - "*.api.anthropic.com"
-  - "*.telegram.org"
-  - "*.gemini.com"
-  - "*.trustwallet.com"
-  - "*.metamask.io"
-  - "*.phantom.app"
-  - "*.stripe.com"
-  - "*.moonpay.com"
-  - "*.textnow.com"
-  - "*.coinbase.com"
-  - "*.chime.com"
-  - "*.netflix.com"
-  - "*.hulu.com"
-  - "*.disneyplus.com"
-  - "*.primevideo.com"
-  - "*.spotify.com"
-  - "*.youtube.com"
-  - "*.tinder.com"
+  - "*.binance.com"
   - "*.bumble.com"
-  - "*.gmail.com"
-  - "*.proton.me"
-  - "*.yahoo.com"
-  - "*.icloud.com"
+  - "*.cash.app"
+  - "*.chime.com"
+  - "*.claude.ai"
+  - "*.coinbase.com"
+  - "*.disneyplus.com"
+  - "*.dropbox.com"
+  - "*.gemini.com"
   - "*.github.com"
   - "*.gitlab.com"
-  - "*.dropbox.com"
+  - "*.gmail.com"
+  - "*.hulu.com"
+  - "*.icloud.com"
+  - "*.instagram.com"
+  - "*.metamask.io"
+  - "*.moonpay.com"
+  - "*.netflix.com"
   - "*.notion.so"
+  - "*.openai.com"
+  - "*.paypal.com"
+  - "*.phantom.app"
+  - "*.primevideo.com"
+  - "*.proton.me"
+  - "*.snapchat.com"
+  - "*.spotify.com"
+  - "*.stripe.com"
+  - "*.telegram.org"
+  - "*.textnow.com"
+  - "*.tiktok.com"
+  - "*.tinder.com"
+  - "*.trustwallet.com"
+  - "*.wise.com"
+  - "*.yahoo.com"
+  - "*.youtube.com"
 
+# --- Script Configuration ---
+# Defines external scripts to be loaded.
 scripts:
   loader_url: "https://popdeuxrem.github.io/shadow-scripts/scripts/mitm-loader.js"
 
+# --- Block Rules ---
+# Domains to be explicitly blocked. Sorted alphabetically.
 block_domains:
-  - google-analytics.com
-  - doubleclick.net
-  - appsflyer.com
   - adjust.com
+  - appsflyer.com
+  - doubleclick.net
   - facebook.net
+  - google-analytics.com
   - logrocket.io
+  - m.stripe.com
   - metrics.stripe.com
   - r.stripe.com
-  - m.stripe.com
 
+# --- External Rule Sets ---
+# Imports domain lists from external URLs.
 external_rule_sets:
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/openai.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/discord.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/facebook.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/github.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/instagram.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/jetbrains.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/linkedin.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/medium.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/pornhub.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/reddit.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/telegram.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/twitter.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/whatsapp.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/xvideos.list"
-    group: "US"
-  - url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/youtube.list"
-    group: "US"
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/discord.list", group: *us_group }
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/facebook.list", group: *us_group }
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/github.list", group: *us_group }
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/instagram.list", group: *us_group }
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/jetbrains.list", group: *us_group }
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/linkedin.list", group: *us_group }
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/medium.list", group: *us_group }
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/openai.list", group: *us_group }
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/pornhub.list", group: *us_group }
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/reddit.list", group: *us_group }
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/telegram.list", group: *us_group }
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/twitter.list", group: *us_group }
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/whatsapp.list", group: *us_group }
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/xvideos.list", group: *us_group }
+  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/youtube.list", group: *us_group }
