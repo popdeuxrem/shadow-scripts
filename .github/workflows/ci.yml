@@ -1,51 +1,85 @@
-name: Build & Deploy
+# A more descriptive name for the workflow
+name: CI/CD - Build and Deploy to GitHub Pages
 
 on:
+  # Triggers the workflow on pushes to the main branch
   push:
     branches: [main]
+  # Allows the workflow to be run manually from the Actions tab
   workflow_dispatch:
 
-# Add this permissions block
-permissions:
-  contents: write
-  pages: write
-
-env:
-  DNS_SERVER: 1.1.1.1
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 jobs:
+  # This job handles the build process
   build:
+    name: Build
     runs-on: ubuntu-latest
-    name: Build & Deploy
+    # Define outputs that can be used by other jobs
+    outputs:
+      # The short commit hash will be passed to the deploy job
+      commit_hash: ${{ steps.vars.outputs.sha_short }}
 
     steps:
-      - name: Checkout
+      - name: ⬇️ Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install pnpm
+      - name: 🟢 Setup pnpm
         uses: pnpm/action-setup@v3
         with:
           version: 8
 
-      - name: Setup Node.js
+      - name: 🟢 Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: '20' # Using the latest LTS version of Node.js
           cache: 'pnpm'
 
-      - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+      - name: 📦 Install dependencies
+        run: pnpm install --frozen-lockfile # Use --frozen-lockfile for reproducible builds
 
-      - name: Build all
+      - name: 📌 Set short git commit SHA
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: 🔨 Run build script
+        # Pass the commit hash as an environment variable for the build script
+        env:
+          GIT_COMMIT: ${{ steps.vars.outputs.sha_short }}
         run: |
-          chmod +x scripts/build-all.sh
+          # Ensure the build script is executable
+          chmod +x ./scripts/build-all.sh
           ./scripts/build-all.sh
 
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - name: 📤 Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./apps/loader/public
-          publish_branch: gh-pages
-          force_orphan: true
+          name: github-pages-artifact
+          # The directory that will be deployed to GitHub Pages
+          path: ./apps/loader/public
+
+  # This job handles the deployment process and depends on the build job
+  deploy:
+    name: Deploy to GitHub Pages
+    # The deployment will only run if the build job completes successfully
+    needs: build
+    runs-on: ubuntu-latest
+
+    # Set permissions required for deploying to GitHub Pages
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    # Configure the deployment environment for GitHub Pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: 📥 Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: github-pages-artifact
+
+      - name: 🚀 Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
