@@ -1,337 +1,234 @@
 #!/usr/bin/env bash
+#
 # ────────────────────────────────────────────────────────────────────────────────
-#  build-all.sh  ─  End-to-end orchestrator
-#     • cleans previous artefacts
-#     • generates configs (Shadowrocket / Stash / Loon / mobileconfig)
-#     • obfuscates every *.js under src-scripts/**  →  *.js.b64
-#     • regenerates manifest.json, mitm-loader.js, catalog.html
-#     • performs integrity checks
+#  build-all.sh — High-Performance Build & Deployment Orchestrator
+# ────────────────────────────────────────────────────────────────────────────────
+#  This script automates the entire build process, including:
+#    • Cleaning previous build artifacts.
+#    • Generating configuration files for various clients (Shadowrocket, Stash, etc.).
+#    • Processing and encoding JavaScript payloads in parallel for maximum speed.
+#    • Caching build artifacts to avoid redundant work.
+#    • Generating a manifest, loaders, and a static catalog page.
+#    • Performing integrity checks to ensure build quality.
 # ────────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
-# ─── folders ──────────────────────────────────────────────────────────────────
-ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC_DIR="$ROOT_DIR/src-scripts"
-CONF_DIR="$ROOT_DIR/apps/loader/public/configs"
-OBF_DIR="$ROOT_DIR/apps/loader/public/obfuscated"
-PUBLIC_DIR="$ROOT_DIR/apps/loader/public"
-CACHE_DIR="$ROOT_DIR/.build-cache"
+# --- Configuration & Constants ---
+readonly ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly SRC_DIR="${ROOT_DIR}/src-scripts"
+readonly PUBLIC_DIR="${ROOT_DIR}/apps/loader/public"
+readonly CONF_DIR="${PUBLIC_DIR}/configs"
+readonly PAYLOAD_DIR="${PUBLIC_DIR}/obfuscated"
+readonly CACHE_DIR="${ROOT_DIR}/.build-cache"
+readonly SCRIPTS_DIR="${ROOT_DIR}/scripts"
 
-# ─── environment ──────────────────────────────────────────────────────────────
-DNS_SERVER="${DNS_SERVER:-1.1.1.1}"     # used by gen-mobileconfig.js
-export DNS_SERVER
-BUILD_VERSION="$(date +%Y%m%d-%H%M%S)"
-BUILD_ID="$(git rev-parse --short HEAD 2>/dev/null || echo "${BUILD_VERSION}")"
+# Build metadata
+readonly BUILD_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+readonly BUILD_VERSION=$(date -u +"%Y%m%d-%H%M%S")
+readonly BUILD_ID="${GIT_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo "local")}"
 
-# ─── helpers ──────────────────────────────────────────────────────────────────
-die()  { echo -e "\n❌  $*\n" >&2; exit 1; }
-warn() { echo -e "\n⚠️  $*\n" >&2; }
-info() { echo -e "\033[36m$*\033[0m"; }
-success() { echo -e "\033[32m✓ $*\033[0m"; }
-have() { command -v "$1" >/dev/null 2>&1; }
+# --- Logging & Helper Functions ---
+# Color codes
+readonly C_RESET='\033[0m'
+readonly C_INFO='\033[36m'    # Cyan
+readonly C_SUCCESS='\033[32m' # Green
+readonly C_WARN='\033[33m'    # Yellow
+readonly C_ERROR='\033[91m'   # Red
+readonly C_BOLD='\033[1m'
 
-# Create basic function for generating a base64 version of a file
-generate_b64() {
-  local input="$1"
-  local output="$2"
-  
-  # Simple JavaScript-based obfuscator if javascript-obfuscator isn't available
-  if [[ ! -f "$output" ]]; then
-    info "Generating base64 from: $(basename "$input")"
-    base64 "$input" > "$output"
-    if [[ -s "$output" ]]; then
-      success "Generated: $(basename "$output")"
-      return 0
-    else
-      warn "Failed to generate base64 for: $(basename "$input")"
-      return 1
+# Log functions
+info()    { echo -e "${C_INFO}==>${C_RESET} ${C_BOLD}$*${C_RESET}"; }
+success() { echo -e "${C_SUCCESS} ✓ ${C_RESET}$*"; }
+warn()    { echo -e "${C_WARN} ⚠️ ${C_RESET}$*" >&2; }
+die()     { echo -e "\n${C_ERROR} ❌ ERROR: $*${C_RESET}\n" >&2; exit 1; }
+have()    { command -v "$1" &>/dev/null; }
+
+# --- Main Build Functions ---
+
+# 1. Prepare environment and check dependencies
+prepare() {
+  info "Preparing Environment"
+  # Check for required commands
+  local deps=("node" "git" "base64")
+  [[ "$(find "$PAYLOAD_DIR" -type f -name "*.js.b64" 2>/dev/null | wc -l)" -gt 0 ]] && deps+=("jq")
+  for dep in "${deps[@]}"; do
+    have "$dep" || die "'$dep' is not installed, but is required for the build."
+  done
+
+  # Create necessary directories
+  mkdir -p "$PUBLIC_DIR" "$CONF_DIR" "$PAYLOAD_DIR" "$CACHE_DIR"
+  success "Environment ready"
+  echo "Build ID: ${BUILD_ID}"
+}
+
+# 2. Clean previous build artifacts
+clean() {
+  info "Cleaning Old Artifacts"
+  # A targeted clean is safer than 'rm -rf' on the whole public dir
+  find "$CONF_DIR" "$PAYLOAD_DIR" -mindepth 1 -delete
+  success "Cleaned output directories"
+}
+
+# 3. Generate client-specific configuration files
+generate_configs() {
+  info "Generating Config Files"
+  local generated=0
+  for script in "gen-shadowrocket.js" "gen-stash.js" "gen-loon.js" "gen-mobileconfig.js"; do
+    if [[ -f "${SCRIPTS_DIR}/${script}" ]]; then
+      node "${SCRIPTS_DIR}/${script}" && { success "Generated ${script/gen-/}"; ((generated++)); }
     fi
+  done
+  ((generated == 0)) && warn "No config generation scripts found or run."
+}
+
+# 4. Process a single JS payload: cache check -> encode -> cache store
+process_single_payload() {
+  local js_file="$1"
+  local base_name
+  base_name=$(basename "${js_file%.js}")
+  local encoded_file="${PAYLOAD_DIR}/${base_name}.js.b64"
+  
+  # Use git hash-object for a reliable content hash
+  local file_hash
+  file_hash=$(git hash-object "$js_file")
+  local cache_file="${CACHE_DIR}/${base_name}-${file_hash}.js.b64"
+
+  if [[ -f "$cache_file" ]]; then
+    cp "$cache_file" "$encoded_file"
+    echo "CACHE" # Signal cache hit
   else
-    info "Using existing: $(basename "$output")"
-    return 0
+    if base64 "$js_file" > "$encoded_file"; then
+      cp "$encoded_file" "$cache_file"
+      echo "BUILT" # Signal successful build
+    else
+      echo "FAILED" # Signal failure
+    fi
+  fi
+}
+export -f process_single_payload # Export for xargs
+
+# 5. Process all JS payloads in parallel
+process_all_payloads() {
+  info "Processing JavaScript Payloads"
+  shopt -s globstar nullglob
+  local js_files=("$SRC_DIR"/**/*.js)
+  shopt -u globstar nullglob
+
+  if [[ ${#js_files[@]} -eq 0 ]]; then
+    warn "No JavaScript files found in '$SRC_DIR'."
+    return
+  fi
+  
+  info "Found ${#js_files[@]} files. Processing in parallel..."
+  
+  # Use xargs for parallel execution. `nproc` gets core count.
+  local results
+  results=$(printf '%s\n' "${js_files[@]}" | xargs -n 1 -P "$(nproc 2>/dev/null || echo 4)" -I{} bash -c "process_single_payload '{}'")
+  
+  # Tally results
+  local built_count failed_count cache_count
+  built_count=$(grep -c "BUILT" <<< "$results" || true)
+  failed_count=$(grep -c "FAILED" <<< "$results" || true)
+  cache_count=$(grep -c "CACHE" <<< "$results" || true)
+
+  success "Processed: ${#js_files[@]} | Built: $built_count | Cached: $cache_count | Failed: $failed_count"
+  if (( failed_count > 0 )); then
+    die "$failed_count payload(s) failed to process."
   fi
 }
 
-run_if() { 
-  if [[ -f "$1" ]]; then
-    info "Running $(basename "$1")..."
-    if node "$1"; then
-      success "$(basename "$1")"
-      return 0
-    else
-      warn "$(basename "$1") failed"
-      return 1
-    fi
+# 6. Generate manifest, loaders, and static pages
+generate_assets() {
+  info "Generating Manifest and Static Assets"
+  
+  # Generate manifest.json
+  (
+    cd "$PAYLOAD_DIR" || exit 1
+    printf '%s\n' *.js.b64 | jq -R . | jq -s . > "$PUBLIC_DIR/manifest.json"
+  )
+  success "Generated manifest.json"
+
+  # Generate mitm-loader.js
+  [[ -f "${SCRIPTS_DIR}/gen-mitm-loader.js" ]] && node "${SCRIPTS_DIR}/gen-mitm-loader.js"
+  success "Generated mitm-loader.js"
+
+  # Copy static HTML templates
+  cp "${SCRIPTS_DIR}/manifest-loader.html" "${PUBLIC_DIR}/index.html"
+  cp "${SCRIPTS_DIR}/catalog-template.html" "${PUBLIC_DIR}/catalog.html"
+  success "Copied static HTML pages"
+
+  # Generate build-info.json
+  jq -n \
+    --arg version "$BUILD_VERSION" \
+    --arg buildId "$BUILD_ID" \
+    --arg timestamp "$BUILD_TIMESTAMP" \
+    --argjson processed "$(find "$PAYLOAD_DIR" -type f | wc -l)" \
+    '{version: $version, buildId: $buildId, timestamp: $timestamp, stats: {processed: $processed}}' \
+    > "$PUBLIC_DIR/build-info.json"
+  success "Generated build-info.json"
+}
+
+# 7. Validate the final artifacts
+validate() {
+  info "Validating Artifacts"
+  local errors=0
+  
+  # Check for empty or invalid manifest
+  if ! jq -e '. | length > 0' "$PUBLIC_DIR/manifest.json" >/dev/null; then
+    warn "manifest.json is empty, invalid, or missing."
+    ((errors++))
+  fi
+  
+  # Check for zero-byte files
+  local empty_files
+  empty_files=$(find "$PUBLIC_DIR" -type f -size 0 -print)
+  if [[ -n "$empty_files" ]]; then
+    warn "Found zero-byte artifacts:"
+    echo "$empty_files" >&2
+    ((errors++))
+  fi
+  
+  if ((errors > 0)); then
+    die "Validation failed with $errors error(s)."
   else
-    info "↷ skip: $(basename "$1") (not found)"
-    return 0
+    success "All artifacts validated successfully."
   fi
 }
 
-# ─── 1 · prepare ───────────────────────────────────────────────────────────────
-info "=== [1/8] Preparing environment ==="
-info "Build ID: $BUILD_ID"
-mkdir -p "$CACHE_DIR"
-
-# Check for Node.js
-if ! have node; then
-  die "Node.js is required for this build"
-fi
-
-info "Node.js $(node --version)"
-
-# ─── 2 · clean ────────────────────────────────────────────────────────────────
-info "=== [2/8] Clean outputs ==="
-rm -rf -- "$CONF_DIR" "$OBF_DIR"
-mkdir -p  -- "$CONF_DIR" "$OBF_DIR" "$PUBLIC_DIR"
-
-# ─── 3 · configs ──────────────────────────────────────────────────────────────
-info "=== [3/8] Generate configs ==="
-run_if "$ROOT_DIR/scripts/gen-shadowrocket.js" || warn "Failed to generate Shadowrocket config"
-run_if "$ROOT_DIR/scripts/gen-stash.js" || warn "Failed to generate Stash config"
-run_if "$ROOT_DIR/scripts/gen-loon.js" || warn "Failed to generate Loon config"
-run_if "$ROOT_DIR/scripts/gen-mobileconfig.js"
-
-# ─── 4 · obfuscate ────────────────────────────────────────────────────────────
-info "=== [4/8] Generate base64 payloads ==="
-shopt -s globstar nullglob
-JS_LIST=( "$SRC_DIR"/**/*.js )
-PROCESSED=0
-FAILED=0
-
-if [[ ${#JS_LIST[@]} -eq 0 ]]; then
-  info "↷ no payloads in $SRC_DIR"
-else
-  info "Found ${#JS_LIST[@]} JavaScript files to process"
+# --- Script Entrypoint ---
+main() {
+  # Cleanup on exit
+  trap 'echo -e "\n${C_WARN}Build interrupted. Cleaning up...${C_RESET}"; exit 1' INT TERM
   
-  # Process files individually
-  for JS in "${JS_LIST[@]}"; do
-    # Generate base filename and paths
-    base=$(basename "$JS")
-    base_no_ext=${base%.js}
-    b64="$OBF_DIR/$base_no_ext.js.b64"
-    
-    # Skip files ending with -obfuscated.js as they're already processed
-    if [[ "$base_no_ext" == *-obfuscated ]]; then
-      info "Skipping pre-obfuscated file: $base"
-      continue
-    fi
-    
-    # Generate cache key based on file content
-    if have sha256sum; then
-      file_hash=$(sha256sum "$JS" | cut -d ' ' -f1)
-    elif have shasum; then
-      file_hash=$(shasum -a 256 "$JS" | cut -d ' ' -f1)
-    else
-      file_hash=$(stat -c %s_%Y "$JS" 2>/dev/null || stat -f %z_%m "$JS")
-    fi
-    
-    cache_file="$CACHE_DIR/$base_no_ext-$file_hash.js.b64"
-    
-    # Use cache if available
-    if [[ -f "$cache_file" ]]; then
-      cp "$cache_file" "$b64"
-      info "↷ Using cached: $base_no_ext"
-      PROCESSED=$((PROCESSED + 1))
-      continue
-    fi
-    
-    # Generate base64 directly without obfuscation
-    if generate_b64 "$JS" "$b64"; then
-      cp "$b64" "$cache_file"
-      PROCESSED=$((PROCESSED + 1))
-    else
-      FAILED=$((FAILED + 1))
-    fi
-  done
-fi
-shopt -u globstar nullglob
+  local start_time
+  start_time=$(date +%s)
 
-if [[ $FAILED -gt 0 ]]; then
-  warn "$FAILED file(s) failed to process"
-fi
+  prepare
+  clean
+  generate_configs
+  process_all_payloads
+  generate_assets
+  validate
 
-if [[ $PROCESSED -eq 0 ]]; then
-  warn "No files were successfully processed"
-  # Create an empty manifest to prevent later steps from failing
-  echo "[]" > "$PUBLIC_DIR/manifest.json"
-fi
+  local end_time duration
+  end_time=$(date +%s)
+  duration=$((end_time - start_time))
 
-# ─── 5 · manifest & loader assets ─────────────────────────────────────────────
-info "=== [5/8] Write manifest.json ==="
-if have jq && [[ $PROCESSED -gt 0 ]]; then
-  ( cd "$OBF_DIR" && printf '%s\n' *.js.b64 2>/dev/null | jq -R . | jq -s . ) \
-    > "$PUBLIC_DIR/manifest.json"
-else
-  # Fallback manifest generation with Node.js
-  node - <<'NODE' "$OBF_DIR" "$PUBLIC_DIR/manifest.json"
-    const fs = require('fs');
-    const path = require('path');
-    const [dir,out] = process.argv.slice(2);
-    let files = [];
-    try { 
-      files = fs.readdirSync(dir).filter(f => f.endsWith(".js.b64")).sort(); 
-    } catch(e) { 
-      console.error("Error reading directory:", e.message);
-    }
-    try {
-      fs.mkdirSync(path.dirname(out), {recursive: true});
-      fs.writeFileSync(out, JSON.stringify(files, null, 2) + "\n");
-    } catch(e) {
-      console.error("Error writing manifest:", e.message);
-      process.exit(1);
-    }
-NODE
-fi
-
-info "=== [6/8] Generate mitm-loader.js ==="
-mkdir -p "$PUBLIC_DIR/scripts"
-run_if "$ROOT_DIR/scripts/gen-mitm-loader.js" || {
-  # Fallback loader if script is missing
-  cat > "$PUBLIC_DIR/scripts/mitm-loader.js" <<'JS'
-(function(){
-  'use strict';
-  const base = (document.currentScript?.src || location.href).split('/scripts/')[0].replace(/\/$/, '');
-  const manifest = `${base}/manifest.json`;
-  const obfDir = `${base}/obfuscated/`;
-  
-  // Efficient script injection
-  const inject = text => {
-    const script = document.createElement('script');
-    script.textContent = text;
-    document.documentElement.appendChild(script);
-  };
-  
-  // Load file with retry
-  const loadScript = async (file, retries = 2) => {
-    for (let i = 0; i <= retries; i++) {
-      try {
-        const res = await fetch(`${obfDir}${file}`, {
-          cache: 'no-store',
-          credentials: 'omit'
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        inject(atob(await res.text()));
-        return true;
-      } catch (e) {
-        if (i === retries) console.error(`Failed to load ${file}:`, e);
-        else await new Promise(r => setTimeout(r, 250 * Math.pow(2, i)));
-      }
-    }
-    return false;
-  };
-  
-  // Main execution
-  fetch(manifest, {cache: 'no-store'})
-    .then(r => r.ok ? r.json() : Promise.reject(`Manifest error: ${r.status}`))
-    .then(files => {
-      if (!Array.isArray(files)) throw new Error('Invalid manifest format');
-      return Promise.all(files.map(loadScript));
-    })
-    .catch(e => console.error('[Loader]', e));
-})();
-JS
-  success "Generated fallback mitm-loader.js"
+  info "Build Complete!"
+  echo -e "
+${C_BOLD}┌──────────────────┬───────────────────────────────────────────┐${C_RESET}
+${C_BOLD}│ Build Summary    │                                           │${C_RESET}
+${C_BOLD}├──────────────────┼───────────────────────────────────────────┤${C_RESET}
+${C_BOLD}│ Version          │${C_RESET} ${BUILD_VERSION}                     ${C_BOLD}│${C_RESET}
+${C_BOLD}│ Git Commit       │${C_RESET} ${BUILD_ID}                                 ${C_BOLD}│${C_RESET}
+${C_BOLD}│ Payloads         │${C_RESET} $(find "$PAYLOAD_DIR" -type f | wc -l) files generated                      ${C_BOLD}│${C_RESET}
+${C_BOLD}│ Configs          │${C_RESET} $(find "$CONF_DIR" -type f | wc -l) files generated                       ${C_BOLD}│${C_RESET}
+${C_BOLD}│ Total Duration   │${C_RESET} ${duration} seconds                               ${C_BOLD}│${C_RESET}
+${C_BOLD}└──────────────────┴───────────────────────────────────────────┘${C_RESET}
+"
+  success "All artifacts are located in: $PUBLIC_DIR"
 }
 
-info "=== [7/8] Copy static templates ==="
-if [[ -f "$ROOT_DIR/scripts/manifest-loader.html" ]]; then
-  cp -f "$ROOT_DIR/scripts/manifest-loader.html" "$PUBLIC_DIR/index.html"
-else
-  # Create fallback index.html
-  cat > "$PUBLIC_DIR/index.html" <<HTML
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Loader</title>
-  <meta name="robots" content="noindex,nofollow">
-  <meta http-equiv="X-Content-Type-Options" content="nosniff">
-</head>
-<body>
-  <script src="./scripts/mitm-loader.js"></script>
-</body>
-</html>
-HTML
-  success "Generated fallback index.html"
-fi
-
-if [[ -f "$ROOT_DIR/scripts/catalog-template.html" ]]; then
-  cp -f "$ROOT_DIR/scripts/catalog-template.html" "$PUBLIC_DIR/catalog.html"
-else
-  # Create fallback catalog.html
-  cat > "$PUBLIC_DIR/catalog.html" <<HTML
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Script Catalog</title>
-  <style>body{font-family:system-ui,sans-serif;max-width:800px;margin:0 auto;padding:20px}</style>
-</head>
-<body>
-  <h1>Script Catalog</h1>
-  <ul>
-HTML
-  
-  for f in "$OBF_DIR"/*.js.b64; do
-    [[ -f "$f" ]] || continue
-    base=$(basename "$f")
-    echo "    <li><a href=\"./obfuscated/$base\">$base</a></li>" >> "$PUBLIC_DIR/catalog.html"
-  done
-  
-  cat >> "$PUBLIC_DIR/catalog.html" <<HTML
-  </ul>
-  <footer>Build: ${BUILD_ID} (${BUILD_VERSION})</footer>
-</body>
-</html>
-HTML
-  success "Generated fallback catalog.html"
-fi
-
-# Generate build info JSON
-cat > "$PUBLIC_DIR/build-info.json" <<JSON
-{
-  "version": "${BUILD_VERSION}",
-  "buildId": "${BUILD_ID}",
-  "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-  "dns": "${DNS_SERVER}",
-  "stats": {
-    "processed": ${PROCESSED},
-    "failed": ${FAILED},
-    "totalFiles": ${#JS_LIST[@]}
-  }
-}
-JSON
-
-# ─── 8 · validation ───────────────────────────────────────────────────────────
-info "=== [8/8] Validate artifacts ==="
-if [[ ! -s "$PUBLIC_DIR/manifest.json" ]]; then
-  warn "manifest.json is empty or missing"
-fi
-
-EMPTY_FILES=$(find "$PUBLIC_DIR" -type f \( -name '*.js' -o -name '*.json' \) -size 0 -print)
-if [[ -n "$EMPTY_FILES" ]]; then
-  warn "Zero-byte artifacts found:"
-  echo "$EMPTY_FILES"
-else
-  success "No zero-byte artifacts"
-fi
-
-# ─── summary ─────────────────────────────────────────────────────────────────
-info "=== Summary ==="
-printf "Config files   : %d\n" "$(find "$CONF_DIR" -type f 2>/dev/null | wc -l)"
-printf "Payloads (.b64): %d of %d\n" "$PROCESSED" "${#JS_LIST[@]}"
-echo   "manifest.json  : $PUBLIC_DIR/manifest.json"
-echo   "index.html     : $PUBLIC_DIR/index.html"
-echo   "catalog.html   : $PUBLIC_DIR/catalog.html"
-echo   "build-info.json: $PUBLIC_DIR/build-info.json"
-
-if [[ $FAILED -eq 0 ]]; then
-  success "Build completed successfully"
-  exit 0
-else
-  warn "$FAILED files failed to process, but build continued"
-  [[ $PROCESSED -gt 0 ]] && exit 0 || exit 1
-fi
+# Run the main function
+main "$@"
