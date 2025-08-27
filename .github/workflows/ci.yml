@@ -30,11 +30,14 @@ jobs:
       - name: 🟢 Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # Using the latest LTS version of Node.js
+          node-version: '20' # Using a modern LTS version of Node.js
           cache: 'pnpm'
 
       - name: 📦 Install dependencies
-        run: pnpm install --frozen-lockfile # Use --frozen-lockfile for reproducible builds
+        # Using --no-frozen-lockfile to prevent errors if pnpm-lock.yaml is missing.
+        # For reproducible builds, it's recommended to commit pnpm-lock.yaml
+        # and use 'pnpm install --frozen-lockfile' instead.
+        run: pnpm install --no-frozen-lockfile
 
       - name: 📌 Set short git commit SHA
         id: vars
