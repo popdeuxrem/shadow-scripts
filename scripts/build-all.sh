@@ -1,487 +1,413 @@
 #!/usr/bin/env bash
-#
-# ────────────────────────────────────────────────────────────────────────────────
-#  build-all.sh — High-Performance Build & Deployment Orchestrator
-# ────────────────────────────────────────────────────────────────────────────────
-#  This script automates the entire build process, including:
-#    • Cleaning previous build artifacts.
-#    • Generating configuration files for various clients (Shadowrocket, Stash, etc.).
-#    • Processing and encoding JavaScript payloads in parallel for maximum speed.
-#    • Caching build artifacts to avoid redundant work.
-#    • Generating a manifest, loaders, and a static catalog page.
-#    • Performing integrity checks to ensure build quality.
-# ────────────────────────────────────────────────────────────────────────────────
-#
-#  Author: PopduexRem
-#  Updated: 2025-08-29 05:11:05 UTC
-#  Version: 2.0.0
+# ───────────────────────────────────────────────────────────────
+# build-all.sh ─ Orchestrates config + payload builds
+#   • Cleans old artifacts
+#   • Runs all generators (conf / mobileconfig / mitm-loader)
+#   • Obfuscates payloads into .js.b64
+#   • Writes manifest.json
+#   • Injects cache-busting commit hash
+# ───────────────────────────────────────────────────────────────
 
 set -euo pipefail
+IFS=$'\n\t'
 
-# --- Configuration & Constants ---
-readonly ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly SRC_DIR="${ROOT_DIR}/src-scripts"
-readonly PUBLIC_DIR="${ROOT_DIR}/apps/loader/public"
-readonly CONF_DIR="${PUBLIC_DIR}/configs"
-readonly PAYLOAD_DIR="${PUBLIC_DIR}/obfuscated"
-readonly CACHE_DIR="${ROOT_DIR}/.build-cache"
-readonly SCRIPTS_DIR="${ROOT_DIR}/scripts"
-readonly LOGS_DIR="${ROOT_DIR}/.build-logs"
+# ─── Functions ───────────────────────────────────────────────────────
+log() { echo -e "\033[1;36m$1\033[0m"; }
+warn() { echo -e "\033[1;33m⚠️ $1\033[0m"; }
+error() { echo -e "\033[1;31m❌ $1\033[0m"; exit 1; }
+success() { echo -e "\033[1;32m✅ $1\033[0m"; }
+separator() { echo -e "\n\033[1;35m=== [$1/$TOTAL_STEPS] $2 ===\033[0m\n"; }
+check_command() { command -v "$1" >/dev/null 2>&1 || error "Required command '$1' not found"; }
 
-# Build metadata
-readonly BUILD_TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-readonly BUILD_VERSION=$(date -u +"%Y%m%d-%H%M%S")
-readonly BUILD_ID="${GIT_COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo "local")}"
-readonly SESSION_ID="build-$(date +%s)-$$"
-readonly BUILD_USER="PopduexRem"
+# ─── Configuration ──────────────────────────────────────────────────
+TOTAL_STEPS=8
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC_DIR="$ROOT_DIR/src-scripts"
+PUBLIC_DIR="$ROOT_DIR/apps/loader/public"
+CONF_DIR="$PUBLIC_DIR/configs"
+OBF_DIR="$PUBLIC_DIR/obfuscated"
+TEMP_DIR="$(mktemp -d)"
+BUILD_START=$(date +%s)
 
-# Performance settings (can be overridden via environment)
-MAX_PARALLEL_JOBS="${BUILD_MAX_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)}"
-CACHE_SIZE_LIMIT="${BUILD_CACHE_SIZE:-1073741824}"  # 1GB default
-BUILD_TIMEOUT="${BUILD_TIMEOUT:-300}"  # 5 minutes
+# Environment validation
+check_command node
+check_command jq
+check_command base64
+check_command npx
 
-# Feature flags (can be overridden via CLI or environment)
-ENABLE_WATCH_MODE="${BUILD_WATCH:-false}"
-ENABLE_INTERACTIVE="${BUILD_INTERACTIVE:-false}"
-ENABLE_NOTIFICATIONS="${BUILD_NOTIFICATIONS:-true}"
-ENABLE_COMPRESSION="${BUILD_COMPRESSION:-true}"
-ENABLE_SECURITY_SCAN="${BUILD_SECURITY_SCAN:-true}"
-STRUCTURED_LOGGING="${BUILD_STRUCTURED_LOG:-false}"
+# Parse arguments
+VERBOSE=false
+DEBUG=false
+SKIP_OBFUSCATION=false
+SKIP_VALIDATION=false
 
-# --- Logging & Helper Functions ---
-# Color codes
-readonly C_RESET='\033[0m'
-readonly C_INFO='\033[36m'    # Cyan
-readonly C_SUCCESS='\033[32m' # Green
-readonly C_WARN='\033[33m'    # Yellow
-readonly C_ERROR='\033[91m'   # Red
-readonly C_BOLD='\033[1m'
-readonly C_DEBUG='\033[90m'   # Gray
-readonly C_PROGRESS='\033[35m' # Magenta
-
-# Emoji support detection
-EMOJI_SUPPORT="$(locale charmap 2>/dev/null | grep -qi utf && echo true || echo false)"
-E_ROCKET="$([[ "$EMOJI_SUPPORT" == "true" ]] && echo "🚀" || echo "=>")"
-E_CHECK="$([[ "$EMOJI_SUPPORT" == "true" ]] && echo "✓" || echo "OK")"
-E_WARN="$([[ "$EMOJI_SUPPORT" == "true" ]] && echo "⚠️" || echo "WARN")"
-E_ERROR="$([[ "$EMOJI_SUPPORT" == "true" ]] && echo "❌" || echo "ERROR")"
-E_DEBUG="$([[ "$EMOJI_SUPPORT" == "true" ]] && echo "🔍" || echo "DEBUG")"
-
-# Initialize logging
-mkdir -p "$LOGS_DIR"
-LOG_FILE="${LOGS_DIR}/${SESSION_ID}.log"
-
-# Log functions
-log_structured() {
-  local level="$1" message="$2" component="${3:-main}" context="${4:-{}}"
-  local timestamp="$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")"
-  
-  if [[ "$STRUCTURED_LOGGING" == "true" ]]; then
-    printf '{"timestamp":"%s","level":"%s","component":"%s","message":"%s","context":%s,"session_id":"%s"}\n' \
-      "$timestamp" "$level" "$component" "$message" "$context" "$SESSION_ID" | tee -a "$LOG_FILE"
-  else
-    echo "[$timestamp] [$level] [$component] $message" >> "$LOG_FILE"
-  fi
-}
-
-info() { 
-  echo -e "${C_INFO}${E_ROCKET}${C_RESET} ${C_BOLD}$*${C_RESET}"
-  log_structured "INFO" "$*"
-}
-
-success() { 
-  echo -e "${C_SUCCESS} ${E_CHECK} ${C_RESET}$*"
-  log_structured "INFO" "$*"
-}
-
-warn() { 
-  echo -e "${C_WARN} ${E_WARN} ${C_RESET}$*" >&2
-  log_structured "WARN" "$*"
-}
-
-debug() { 
-  [[ "${DEBUG:-}" == "1" ]] && echo -e "${C_DEBUG}${E_DEBUG} ${C_DIM}$*${C_RESET}" >&2
-  log_structured "DEBUG" "$*"
-}
-
-die() { 
-  echo -e "\n${C_ERROR} ${E_ERROR} ERROR: $*${C_RESET}\n" >&2
-  log_structured "ERROR" "$*"
-  cleanup_on_exit
-  exit 1
-}
-
-have() { 
-  command -v "$1" &>/dev/null
-}
-
-# Progress indicator with percentage
-show_progress() {
-  local current="$1" total="$2" message="${3:-Processing}"
-  local percent=$((current * 100 / total))
-  local filled=$((percent / 2))
-  local empty=$((50 - filled))
-  
-  printf "\r${C_PROGRESS}%s${C_RESET} [" "$message"
-  printf "%*s" "$filled" | tr ' ' '█'
-  printf "%*s" "$empty" | tr ' ' '░'
-  printf "] %d%% (%d/%d)" "$percent" "$current" "$total"
-  
-  [[ "$current" -eq "$total" ]] && echo
-}
-
-# Utility functions
-hash_content() {
-  local file="$1"
-  local stat_info
-  stat_info="$(stat -c '%Y-%s' "$file" 2>/dev/null || stat -f '%m-%z' "$file" 2>/dev/null || echo "0-0")"
-  echo "${stat_info}-$(sha256sum "$file" 2>/dev/null | cut -d' ' -f1 || md5sum "$file" 2>/dev/null | cut -d' ' -f1 || echo "unknown")"
-}
-
-notify() {
-  local title="$1" message="$2" urgency="${3:-normal}"
-  
-  if [[ "$ENABLE_NOTIFICATIONS" == "true" ]]; then
-    if have notify-send; then
-      notify-send -u "$urgency" "$title" "$message" 2>/dev/null || true
-    elif have osascript; then
-      osascript -e "display notification \"$message\" with title \"$title\"" 2>/dev/null || true
-    fi
-  fi
-}
-
-cleanup_on_exit() {
-  local exit_code=$?
-  
-  if [[ $exit_code -ne 0 ]]; then
-    warn "Build failed with exit code $exit_code"
-    # Add any cleanup or rollback logic here
-  fi
-  
-  # Cleanup temporary files if needed
-  find "${TMPDIR:-/tmp}" -name "build-$$-*" -delete 2>/dev/null || true
-  
-  debug "Cleanup completed"
-}
-
-trap cleanup_on_exit EXIT INT TERM
-
-# --- Main Build Functions ---
-
-# 1. Prepare environment and check dependencies
-prepare() {
-  info "Preparing Environment"
-  # Check for required commands
-  local deps=("node" "git" "base64")
-  [[ "$(find "$PAYLOAD_DIR" -type f -name "*.js.b64" 2>/dev/null | wc -l)" -gt 0 ]] && deps+=("jq")
-  for dep in "${deps[@]}"; do
-    have "$dep" || die "'$dep' is not installed, but is required for the build."
-  done
-
-  # Create necessary directories
-  mkdir -p "$PUBLIC_DIR" "$CONF_DIR" "$PAYLOAD_DIR" "$CACHE_DIR"
-  success "Environment ready"
-  echo "Build ID: ${BUILD_ID}"
-}
-
-# 2. Clean previous build artifacts
-clean() {
-  info "Cleaning Old Artifacts"
-  # A targeted clean is safer than 'rm -rf' on the whole public dir
-  find "$CONF_DIR" "$PAYLOAD_DIR" -mindepth 1 -delete
-  success "Cleaned output directories"
-}
-
-# 3. Generate client-specific configuration files
-generate_configs() {
-  info "Generating Config Files"
-  local generated=0
-  local failures=0
-  local scripts=("gen-shadowrocket.js" "gen-stash.js" "gen-loon.js" "gen-mobileconfig.js")
-  local total=${#scripts[@]}
-  
-  for i in "${!scripts[@]}"; do
-    local script="${scripts[$i]}"
-    show_progress $((i + 1)) "$total" "Generating configs"
-    
-    if [[ -f "${SCRIPTS_DIR}/${script}" ]]; then
-      # Run script but don't exit on failure; log a warning instead.
-      if timeout "$BUILD_TIMEOUT" node "${SCRIPTS_DIR}/${script}" --final-group US; then
-        success "Generated ${script/gen-/}"
-        ((generated++))
-      else
-        warn "Failed to generate ${script/gen-/}"
-        ((failures++))
-      fi
-    fi
-  done
-  
-  if ((generated == 0)) && ((failures == 0)); then 
-    warn "No config generation scripts found or run."
-  else
-    success "Configuration generation: $generated/$((generated + failures)) successful"
-  fi
-}
-
-# 4. Process a single JS payload: cache check -> encode -> cache store
-process_payload() {
-  local js_file="$1"
-  local base_name
-  base_name="$(basename "${js_file%.js}")"
-  local encoded_file="${PAYLOAD_DIR}/${base_name}.js.b64"
-  
-  # Content-based cache key
-  local content_hash
-  content_hash="$(hash_content "$js_file")"
-  local cache_key="payload-$content_hash"
-  local cache_file="$CACHE_DIR/content/$cache_key"
-  
-  if [[ -f "$cache_file" ]]; then
-    cp "$cache_file" "$encoded_file"
-    echo "CACHE_HIT"
-  else
-    if [[ "$ENABLE_COMPRESSION" == "true" ]] && have gzip; then
-      # Compress then encode
-      if gzip -c "$js_file" | base64 > "$encoded_file.tmp" && mv "$encoded_file.tmp" "$encoded_file"; then
-        cp "$encoded_file" "$cache_file"
-        echo "BUILT_COMPRESSED"
-      else
-        echo "FAILED"
-      fi
-    else
-      # Standard base64 encoding
-      if base64 "$js_file" > "$encoded_file.tmp" && mv "$encoded_file.tmp" "$encoded_file"; then
-        cp "$encoded_file" "$cache_file"
-        echo "BUILT"
-      else
-        echo "FAILED"
-      fi
-    fi
-  fi
-}
-
-export -f process_payload hash_content
-
-# 5. Process all JS payloads in parallel
-process_all_payloads() {
-  info "Processing JavaScript Payloads"
-  
-  # Find all JavaScript files
-  local js_files=()
-  while IFS= read -r -d '' file; do
-    js_files+=("$file")
-  done < <(find "$SRC_DIR" -name "*.js" -type f -print0 2>/dev/null)
-  
-  if [[ ${#js_files[@]} -eq 0 ]]; then
-    warn "No JavaScript files found in '$SRC_DIR'."
-    return 0
-  fi
-  
-  info "Found ${#js_files[@]} files. Processing with $MAX_PARALLEL_JOBS workers..."
-  
-  # Process files in parallel with progress tracking
-  local temp_file
-  temp_file="$(mktemp)"
-  
-  printf '%s\n' "${js_files[@]}" | \
-    xargs -n 1 -P "$MAX_PARALLEL_JOBS" -I{} bash -c "process_payload '{}'" > "$temp_file"
-  
-  # Analyze results
-  local built_count cache_count failed_count compressed_count
-  built_count="$(grep -c "^BUILT$" "$temp_file" 2>/dev/null || echo 0)"
-  cache_count="$(grep -c "^CACHE_HIT$" "$temp_file" 2>/dev/null || echo 0)"
-  failed_count="$(grep -c "^FAILED$" "$temp_file" 2>/dev/null || echo 0)"
-  compressed_count="$(grep -c "^BUILT_COMPRESSED$" "$temp_file" 2>/dev/null || echo 0)"
-  
-  rm -f "$temp_file"
-  
-  success "Payload processing completed:"
-  echo "  • Total: ${#js_files[@]} files"
-  echo "  • Built: $((built_count + compressed_count)) (compressed: $compressed_count)"
-  echo "  • Cached: $cache_count"
-  echo "  • Failed: $failed_count"
-  
-  if [[ $failed_count -gt 0 ]]; then
-    die "$failed_count payload(s) failed to process."
-  fi
-}
-
-# 6. Generate manifest, loaders, and static pages
-generate_assets() {
-  info "Generating Manifest and Static Assets"
-  
-  # Generate manifest.json
-  if have jq; then
-    (
-      cd "$PAYLOAD_DIR" || exit 1
-      printf '%s\n' *.js.b64 | jq -R . | jq -s . > "$PUBLIC_DIR/manifest.json"
-    )
-    success "Generated manifest.json"
-  else
-    warn "jq not found, generating simple manifest"
-    (
-      cd "$PAYLOAD_DIR" || exit 1
-      printf '[\n' > "$PUBLIC_DIR/manifest.json"
-      ls *.js.b64 2>/dev/null | sed 's/^\(.*\)$/  "\1",/' >> "$PUBLIC_DIR/manifest.json"
-      sed -i '$s/,$//' "$PUBLIC_DIR/manifest.json" 2>/dev/null || true
-      printf '\n]\n' >> "$PUBLIC_DIR/manifest.json"
-    )
-    success "Generated simple manifest.json"
-  fi
-
-  # Generate mitm-loader.js
-  if [[ -f "${SCRIPTS_DIR}/gen-mitm-loader.js" ]]; then
-    if node "${SCRIPTS_DIR}/gen-mitm-loader.js"; then
-      success "Generated mitm-loader.js"
-    else
-      warn "Failed to generate mitm-loader.js"
-    fi
-  fi
-
-  # Copy static HTML templates
-  local templates=("manifest-loader.html:index.html" "catalog-template.html:catalog.html")
-  for template in "${templates[@]}"; do
-    local src="${template%%:*}"
-    local dst="${template##*:}"
-    if [[ -f "${SCRIPTS_DIR}/$src" ]]; then
-      cp "${SCRIPTS_DIR}/$src" "${PUBLIC_DIR}/$dst"
-      success "Copied $dst"
-    else
-      warn "Template not found: $src"
-    fi
-  done
-
-  # Generate build-info.json
-  if have jq; then
-    jq -n \
-      --arg version "$BUILD_VERSION" \
-      --arg buildId "$BUILD_ID" \
-      --arg timestamp "$BUILD_TIMESTAMP" \
-      --argjson processed "$(find "$PAYLOAD_DIR" -type f | wc -l)" \
-      --arg buildUser "$BUILD_USER" \
-      '{version: $version, buildId: $buildId, timestamp: $timestamp, stats: {processed: $processed}, buildUser: $buildUser}' \
-      > "$PUBLIC_DIR/build-info.json"
-  else
-    cat > "$PUBLIC_DIR/build-info.json" << EOF
-{
-  "version": "$BUILD_VERSION",
-  "buildId": "$BUILD_ID",
-  "timestamp": "$BUILD_TIMESTAMP",
-  "stats": {
-    "processed": $(find "$PAYLOAD_DIR" -type f | wc -l)
-  },
-  "buildUser": "$BUILD_USER"
-}
-EOF
-  fi
-  success "Generated build-info.json"
-}
-
-# 7. Validate the final artifacts
-validate() {
-  info "Validating Artifacts"
-  local errors=0
-  
-  # Check for empty or invalid manifest
-  if [[ -f "$PUBLIC_DIR/manifest.json" ]]; then
-    if have jq && ! jq -e '. | length > 0' "$PUBLIC_DIR/manifest.json" >/dev/null; then
-      warn "manifest.json is empty or invalid."
-      ((errors++))
-    fi
-  else
-    warn "manifest.json is missing."
-    ((errors++))
-  fi
-  
-  # Check for zero-byte files
-  local empty_files
-  empty_files=$(find "$PUBLIC_DIR" -type f -size 0 -print)
-  if [[ -n "$empty_files" ]]; then
-    warn "Found zero-byte artifacts:"
-    echo "$empty_files" >&2
-    ((errors++))
-  fi
-  
-  if ((errors > 0)); then
-    die "Validation failed with $errors error(s)."
-  else
-    success "All artifacts validated successfully."
-  fi
-}
-
-# --- Script Entrypoint ---
-main() {
-  # Cleanup on exit
-  trap 'echo -e "\n${C_WARN}Build interrupted. Cleaning up...${C_RESET}"; exit 1' INT TERM
-  
-  local start_time
-  start_time=$(date +%s)
-
-  prepare
-  clean
-  generate_configs
-  process_all_payloads
-  generate_assets
-  validate
-
-  local end_time duration
-  end_time=$(date +%s)
-  duration=$((end_time - start_time))
-
-  info "Build Complete!"
-  echo -e "
-${C_BOLD}┌──────────────────┬───────────────────────────────────────────┐${C_RESET}
-${C_BOLD}│ Build Summary    │                                           │${C_RESET}
-${C_BOLD}├──────────────────┼───────────────────────────────────────────┤${C_RESET}
-${C_BOLD}│ Version          │${C_RESET} ${BUILD_VERSION}                     ${C_BOLD}│${C_RESET}
-${C_BOLD}│ Git Commit       │${C_RESET} ${BUILD_ID}                                 ${C_BOLD}│${C_RESET}
-${C_BOLD}│ Payloads         │${C_RESET} $(find "$PAYLOAD_DIR" -type f | wc -l) files generated                      ${C_BOLD}│${C_RESET}
-${C_BOLD}│ Configs          │${C_RESET} $(find "$CONF_DIR" -type f | wc -l) files generated                       ${C_BOLD}│${C_RESET}
-${C_BOLD}│ Total Duration   │${C_RESET} ${duration} seconds                               ${C_BOLD}│${C_RESET}
-${C_BOLD}└──────────────────┴───────────────────────────────────────────┘${C_RESET}
-"
-  success "All artifacts are located in: $PUBLIC_DIR"
-  notify "Build Complete" "Build finished in ${duration}s" "normal"
-}
-
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    -h|--help)
-      cat << EOF
-Usage: $(basename "$0") [OPTIONS]
-
-Options:
-  -h, --help          Show this help message and exit
-  -c, --clean-only    Only clean artifacts without rebuilding
-  -v, --verbose       Enable verbose output
-  --no-cache          Disable caching
-  --no-compression    Disable compression
-EOF
+for arg in "$@"; do
+  case $arg in
+    --verbose) VERBOSE=true ;;
+    --debug) DEBUG=true ;;
+    --skip-obfuscation) SKIP_OBFUSCATION=true ;;
+    --skip-validation) SKIP_VALIDATION=true ;;
+    --help) 
+      echo "Usage: $0 [options]"
+      echo "Options:"
+      echo "  --verbose           Show verbose output"
+      echo "  --debug             Enable debug mode (preserves temp files)"
+      echo "  --skip-obfuscation  Skip the obfuscation step"
+      echo "  --skip-validation   Skip final validation checks"
+      echo "  --help              Show this help message"
       exit 0
-      ;;
-    -c|--clean-only)
-      prepare
-      clean
-      exit 0
-      ;;
-    -v|--verbose)
-      DEBUG=1
-      ;;
-    --no-cache)
-      rm -rf "$CACHE_DIR/content" 2>/dev/null
-      mkdir -p "$CACHE_DIR/content"
-      ;;
-    --no-compression)
-      ENABLE_COMPRESSION="false"
-      ;;
-    *)
-      warn "Unknown option: $1"
-      exit 1
       ;;
   esac
-  shift
 done
 
-# Run the main function
-main
+# Create build ID
+BUILD_ID="$(date +%Y%m%d%H%M%S)"
+BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+# Determine commit hash for cache busting
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  GIT_COMMIT="$(git rev-parse --short HEAD)"
+  GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+else
+  GIT_COMMIT="dev-$BUILD_ID"
+  GIT_BRANCH="unknown"
+fi
+export GIT_COMMIT
+export GIT_BRANCH
+
+# Capture version from package.json if available
+if [[ -f "$ROOT_DIR/package.json" ]]; then
+  VERSION=$(node -p "require('$ROOT_DIR/package.json').version" 2>/dev/null || echo "unknown")
+else
+  VERSION="0.0.0"
+fi
+
+log "🔁 Build started: $BUILD_ID"
+log "📋 Configuration:"
+log "   • Version:  $VERSION"
+log "   • Commit:   $GIT_COMMIT"
+log "   • Branch:   $GIT_BRANCH"
+log "   • Date:     $BUILD_DATE"
+$SKIP_OBFUSCATION && warn "   • Obfuscation will be skipped"
+$SKIP_VALIDATION && warn "   • Validation will be skipped"
+
+# Error handling and cleanup
+trap 'status=$?; rm -rf "$TEMP_DIR"; [ $status -ne 0 ] && error "Build failed"; exit $status' EXIT
+trap 'echo ""; error "Build interrupted"; exit 1' INT TERM
+
+# ─── 1. Clean ──────────────────────────────────────────────────
+separator 1 "Cleaning outputs"
+
+if [[ -d "$PUBLIC_DIR" ]]; then
+  log "🧹 Cleaning previous build artifacts..."
+  rm -rf "$CONF_DIR" "$OBF_DIR"
+  # Preserve any existing static assets
+  find "$PUBLIC_DIR" -type f \( -name "*.js.b64" -o -name "manifest.json" \) -delete
+else
+  log "🏗️ Creating output directory structure..."
+fi
+
+mkdir -p "$CONF_DIR" "$OBF_DIR" "$PUBLIC_DIR"
+
+# ─── 2. Config generators ──────────────────────────────────────
+separator 2 "Generating configs"
+
+GENERATORS=(gen-shadowrocket.js gen-stash.js gen-loon.js gen-mobileconfig.js)
+SUCCESSFUL_GENERATORS=0
+FAILED_GENERATORS=0
+
+for gen in "${GENERATORS[@]}"; do
+  if [[ -f "$ROOT_DIR/scripts/$gen" ]]; then
+    log "⚙️ Running $gen ..."
+    if node "$ROOT_DIR/scripts/$gen"; then
+      SUCCESSFUL_GENERATORS=$((SUCCESSFUL_GENERATORS + 1))
+    else
+      warn "Generator failed: $gen"
+      FAILED_GENERATORS=$((FAILED_GENERATORS + 1))
+    fi
+  else
+    log "↷ Skipped missing generator: $gen"
+  fi
+done
+
+log "📊 Generators: $SUCCESSFUL_GENERATORS succeeded, $FAILED_GENERATORS failed"
+if [[ $FAILED_GENERATORS -gt 0 ]]; then
+  warn "Some generators failed but build will continue"
+fi
+
+# ─── 3. Obfuscate payloads ─────────────────────────────────────
+separator 3 "Obfuscating payloads"
+
+shopt -s globstar nullglob
+JS_FILES=( "$SRC_DIR"/**/*.js )
+TOTAL_FILES=${#JS_FILES[@]}
+PROCESSED_FILES=0
+FAILED_FILES=0
+
+if [[ $TOTAL_FILES -eq 0 ]]; then
+  warn "No JS payloads found in $SRC_DIR"
+elif [[ "$SKIP_OBFUSCATION" == true ]]; then
+  warn "Skipping obfuscation as requested"
+  for file in "${JS_FILES[@]}"; do
+    base="$(basename "$file" .js)"
+    b64="$OBF_DIR/${base}.js.b64"
+    log "📄 Encoding $file → $b64 (without obfuscation)"
+    base64 "$file" > "$b64"
+    PROCESSED_FILES=$((PROCESSED_FILES + 1))
+  done
+else
+  for file in "${JS_FILES[@]}"; do
+    base="$(basename "$file" .js)"
+    obf="$TEMP_DIR/${base}.ob.js"
+    b64="$OBF_DIR/${base}.js.b64"
+    
+    log "🔒 [$((PROCESSED_FILES + 1))/$TOTAL_FILES] Obfuscating $file"
+    
+    if npx javascript-obfuscator "$file" \
+      --output "$obf" \
+      --compact true \
+      --self-defending true \
+      --control-flow-flattening true \
+      --disable-console-output true \
+      --string-array true \
+      --string-array-encoding base64 \
+      --string-array-threshold 0.8 \
+      --identifier-names-generator mangled \
+      --transform-object-keys true; then
+      
+      # Verify obfuscation worked
+      if [[ ! -s "$obf" ]]; then
+        error "Obfuscation produced empty file for $file"
+      fi
+      
+      # Base64 encode
+      base64 "$obf" > "$b64"
+      
+      # Verify encoding worked
+      if [[ ! -s "$b64" ]]; then
+        error "Base64 encoding failed for $obf"
+      fi
+      
+      PROCESSED_FILES=$((PROCESSED_FILES + 1))
+    else
+      warn "Obfuscation failed for $file"
+      FAILED_FILES=$((FAILED_FILES + 1))
+    fi
+  done
+fi
+shopt -u globstar nullglob
+
+log "📊 Payloads: $PROCESSED_FILES processed, $FAILED_FILES failed"
+
+# ─── 4. Manifest ───────────────────────────────────────────────
+separator 4 "Writing manifest.json"
+
+# Create manifest
+MANIFEST_FILE="$PUBLIC_DIR/manifest.json"
+log "📜 Generating manifest at $MANIFEST_FILE"
+
+if [[ -d "$OBF_DIR" ]]; then
+  (
+    cd "$OBF_DIR"
+    # Create file list with metadata
+    FILES=$(ls *.js.b64 2>/dev/null || echo "")
+    if [[ -n "$FILES" ]]; then
+      # Create enhanced manifest with metadata
+      echo "{
+        \"version\": \"$VERSION\",
+        \"commit\": \"$GIT_COMMIT\",
+        \"branch\": \"$GIT_BRANCH\",
+        \"buildDate\": \"$BUILD_DATE\",
+        \"files\": $(ls *.js.b64 2>/dev/null | sort | jq -R . | jq -s .)
+      }" | jq . > "$MANIFEST_FILE"
+    else
+      # Create empty manifest if no files
+      echo "{
+        \"version\": \"$VERSION\",
+        \"commit\": \"$GIT_COMMIT\",
+        \"branch\": \"$GIT_BRANCH\",
+        \"buildDate\": \"$BUILD_DATE\",
+        \"files\": []
+      }" | jq . > "$MANIFEST_FILE"
+      warn "No payload files found to include in manifest"
+    fi
+  )
+else
+  error "Output directory doesn't exist: $OBF_DIR"
+fi
+
+if [[ ! -s "$MANIFEST_FILE" ]]; then
+  error "Failed to create manifest.json or it's empty"
+fi
+
+success "Manifest created with $(jq '.files | length' "$MANIFEST_FILE") files"
+
+# ─── 5. Loader assets ──────────────────────────────────────────
+separator 5 "Generating mitm-loader.js"
+
+LOADER_GENERATOR="$ROOT_DIR/scripts/gen-mitm-loader.js"
+if [[ -f "$LOADER_GENERATOR" ]]; then
+  log "⚙️ Running MITM loader generator..."
+  
+  if node "$LOADER_GENERATOR" \
+    --hash="$GIT_COMMIT" \
+    --version="$VERSION" \
+    --date="$BUILD_DATE"; then
+    success "MITM loader generated"
+  else
+    error "Failed to generate MITM loader"
+  fi
+else
+  warn "Skipped missing loader generator: $LOADER_GENERATOR"
+fi
+
+# ─── 6. Static templates ───────────────────────────────────────
+separator 6 "Copying templates"
+
+# Index template
+INDEX_TEMPLATE="$ROOT_DIR/scripts/manifest-loader.html"
+if [[ -f "$INDEX_TEMPLATE" ]]; then
+  log "📄 Copying index template..."
+  cp -f "$INDEX_TEMPLATE" "$PUBLIC_DIR/index.html"
+  
+  # Inject version and build info
+  sed -i.bak "s/{{VERSION}}/$VERSION/g" "$PUBLIC_DIR/index.html"
+  sed -i.bak "s/{{BUILD_DATE}}/$BUILD_DATE/g" "$PUBLIC_DIR/index.html"
+  sed -i.bak "s/{{COMMIT}}/$GIT_COMMIT/g" "$PUBLIC_DIR/index.html"
+  rm -f "$PUBLIC_DIR/index.html.bak"
+  
+  success "Index template processed"
+else
+  warn "Index template not found: $INDEX_TEMPLATE"
+fi
+
+# Catalog template
+CATALOG_TEMPLATE="$ROOT_DIR/scripts/catalog-template.html"
+if [[ -f "$CATALOG_TEMPLATE" ]]; then
+  log "📄 Copying catalog template..."
+  cp -f "$CATALOG_TEMPLATE" "$PUBLIC_DIR/catalog.html"
+  
+  # Inject version and build info
+  sed -i.bak "s/{{VERSION}}/$VERSION/g" "$PUBLIC_DIR/catalog.html"
+  sed -i.bak "s/{{BUILD_DATE}}/$BUILD_DATE/g" "$PUBLIC_DIR/catalog.html"
+  sed -i.bak "s/{{COMMIT}}/$GIT_COMMIT/g" "$PUBLIC_DIR/catalog.html"
+  rm -f "$PUBLIC_DIR/catalog.html.bak"
+  
+  success "Catalog template processed"
+else
+  warn "Catalog template not found: $CATALOG_TEMPLATE"
+fi
+
+# ─── 7. Validation ─────────────────────────────────────────────
+separator 7 "Validating artifacts"
+
+if [[ "$SKIP_VALIDATION" == true ]]; then
+  warn "Skipping validation as requested"
+else
+  log "🔍 Checking for empty files..."
+  EMPTY_FILES=$(find "$PUBLIC_DIR" -type f -empty | wc -l)
+  
+  if [[ $EMPTY_FILES -gt 0 ]]; then
+    warn "Found $EMPTY_FILES empty files:"
+    find "$PUBLIC_DIR" -type f -empty -exec echo "  - {}" \;
+    warn "Build may be incomplete"
+  else
+    success "No empty files detected"
+  fi
+  
+  log "🔍 Validating essential files..."
+  REQUIRED_FILES=(
+    "$PUBLIC_DIR/manifest.json"
+    "$PUBLIC_DIR/index.html"
+  )
+  
+  MISSING=0
+  for file in "${REQUIRED_FILES[@]}"; do
+    if [[ ! -f "$file" ]]; then
+      warn "Missing required file: $file"
+      MISSING=$((MISSING + 1))
+    fi
+  done
+  
+  if [[ $MISSING -eq 0 ]]; then
+    success "All required files present"
+  else
+    warn "$MISSING required files are missing"
+  fi
+fi
+
+# Create build info file
+log "📝 Creating build-info.json..."
+cat > "$PUBLIC_DIR/build-info.json" << EOF
+{
+  "version": "$VERSION",
+  "buildId": "$BUILD_ID",
+  "buildDate": "$BUILD_DATE",
+  "gitCommit": "$GIT_COMMIT",
+  "gitBranch": "$GIT_BRANCH",
+  "payloadCount": $(ls "$OBF_DIR"/*.js.b64 2>/dev/null | wc -l),
+  "configCount": $(find "$CONF_DIR" -type f 2>/dev/null | wc -l)
+}
+EOF
+
+# ─── 8. Summary ────────────────────────────────────────────────
+separator 8 "Build Summary"
+
+BUILD_END=$(date +%s)
+BUILD_DURATION=$((BUILD_END - BUILD_START))
+
+# Format duration
+if [[ $BUILD_DURATION -lt 60 ]]; then
+  DURATION_STR="${BUILD_DURATION}s"
+elif [[ $BUILD_DURATION -lt 3600 ]]; then
+  MINUTES=$((BUILD_DURATION / 60))
+  SECONDS=$((BUILD_DURATION % 60))
+  DURATION_STR="${MINUTES}m ${SECONDS}s"
+else
+  HOURS=$((BUILD_DURATION / 3600))
+  MINUTES=$(((BUILD_DURATION % 3600) / 60))
+  DURATION_STR="${HOURS}h ${MINUTES}m"
+fi
+
+# Calculate sizes
+TOTAL_SIZE=$(du -sh "$PUBLIC_DIR" | cut -f1)
+PAYLOADS_SIZE=$(du -sh "$OBF_DIR" 2>/dev/null | cut -f1 || echo "0K")
+CONFIGS_SIZE=$(du -sh "$CONF_DIR" 2>/dev/null | cut -f1 || echo "0K")
+
+log "📊 Build Stats:"
+log "   • Duration:  $DURATION_STR"
+log "   • Version:   $VERSION (commit $GIT_COMMIT)"
+log "   • Configs:   $(find "$CONF_DIR" -type f 2>/dev/null | wc -l) ($CONFIGS_SIZE)"
+log "   • Payloads:  $(ls "$OBF_DIR"/*.js.b64 2>/dev/null | wc -l) ($PAYLOADS_SIZE)"
+log "   • Total Size: $TOTAL_SIZE"
+log "   • Manifest:  $PUBLIC_DIR/manifest.json"
+log "   • Index:     $PUBLIC_DIR/index.html"
+
+# Create a simple report
+cat > "$PUBLIC_DIR/build-report.txt" << EOF
+Shadow Scripts Build Report
+==========================
+Version:    $VERSION
+Build ID:   $BUILD_ID
+Build Date: $BUILD_DATE
+Commit:     $GIT_COMMIT ($GIT_BRANCH)
+Duration:   $DURATION_STR
+
+Files Summary:
+- Configs:   $(find "$CONF_DIR" -type f 2>/dev/null | wc -l) ($CONFIGS_SIZE)
+- Payloads:  $(ls "$OBF_DIR"/*.js.b64 2>/dev/null | wc -l) ($PAYLOADS_SIZE)
+- Total Size: $TOTAL_SIZE
+
+Build completed at $(date)
+EOF
+
+success "Build complete. Output in $PUBLIC_DIR"
+
+# Cleanup temp directory
+if [[ "$DEBUG" != true ]]; then
+  rm -rf "$TEMP_DIR"
+else
+  log "Debug mode: Temporary files preserved at $TEMP_DIR"
+fi
+
+exit 0
