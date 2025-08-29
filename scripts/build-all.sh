@@ -136,62 +136,76 @@ if [[ $FAILED_GENERATORS -gt 0 ]]; then
 fi
 
 # ─── 3. Obfuscate payloads ─────────────────────────────────────
-separator 3 "Obfuscating payloads"
-
+echo "=== [3/8] Obfuscating payloads ==="
 shopt -s globstar nullglob
 JS_FILES=( "$SRC_DIR"/**/*.js )
-TOTAL_FILES=${#JS_FILES[@]}
-PROCESSED_FILES=0
-FAILED_FILES=0
-
-if [[ $TOTAL_FILES -eq 0 ]]; then
-  warn "No JS payloads found in $SRC_DIR"
-elif [[ "$SKIP_OBFUSCATION" == true ]]; then
-  warn "Skipping obfuscation as requested"
-  for file in "${JS_FILES[@]}"; do
-    base="$(basename "$file" .js)"
-    b64="$OBF_DIR/${base}.js.b64"
-    log "📄 Encoding $file → $b64 (without obfuscation)"
-    base64 "$file" > "$b64"
-    PROCESSED_FILES=$((PROCESSED_FILES + 1))
-  done
+if [[ ${#JS_FILES[@]} -eq 0 ]]; then
+  echo "⚠️ Warning: No JS payloads found in $SRC_DIR"
 else
   for file in "${JS_FILES[@]}"; do
+    # Validate file exists and is not empty
+    if [[ ! -f "$file" ]]; then
+      echo "❌ File doesn't exist: $file"
+      continue
+    fi
+    
+    if [[ ! -s "$file" ]]; then
+      echo "❌ Empty file: $file"
+      continue
+    fi
+    
     base="$(basename "$file" .js)"
-    obf="$TEMP_DIR/${base}.ob.js"
+    obf="$OBF_DIR/${base}.ob.js"
     b64="$OBF_DIR/${base}.js.b64"
+
+    echo "🔒 Obfuscating $file → $b64"
     
-    log "🔒 [$((PROCESSED_FILES + 1))/$TOTAL_FILES] Obfuscating $file"
+    # Debug: output file info
+    echo "  • File path: $file"
+    echo "  • File size: $(wc -c < "$file") bytes"
+    echo "  • Output path: $obf"
     
-    if npx javascript-obfuscator "$file" \
-      --output "$obf" \
+    # Ensure the file is actually JavaScript
+    if ! head -n1 "$file" | grep -q -E '(^#!/.*node|^//|^/\*|^var |^let |^const |^import |^function |^class |^export )'; then
+      echo "⚠️ Warning: File doesn't appear to be JavaScript: $file"
+      # Display first few lines for debugging
+      echo "  • File preview:"
+      head -n 3 "$file" | sed 's/^/    /'
+    fi
+
+    # Run obfuscator with better error handling
+    if npx javascript-obfuscator "$file" --output "$obf" \
       --compact true \
       --self-defending true \
       --control-flow-flattening true \
       --disable-console-output true \
       --string-array true \
-      --string-array-encoding base64 \
-      --string-array-threshold 0.8 \
-      --identifier-names-generator mangled \
-      --transform-object-keys true; then
+      --string-array-encoding base64; then
       
-      # Verify obfuscation worked
+      # Verify the output file exists and is not empty
+      if [[ ! -f "$obf" ]]; then
+        echo "❌ Obfuscation failed: Output file not created: $obf"
+        continue
+      fi
+      
       if [[ ! -s "$obf" ]]; then
-        error "Obfuscation produced empty file for $file"
+        echo "❌ Obfuscation produced empty file: $obf"
+        continue
       fi
       
       # Base64 encode
       base64 "$obf" > "$b64"
       
-      # Verify encoding worked
       if [[ ! -s "$b64" ]]; then
-        error "Base64 encoding failed for $obf"
+        echo "❌ Base64 encoding failed for $obf"
+        continue
       fi
       
-      PROCESSED_FILES=$((PROCESSED_FILES + 1))
+      echo "✅ Successfully obfuscated and encoded: $file"
     else
-      warn "Obfuscation failed for $file"
-      FAILED_FILES=$((FAILED_FILES + 1))
+      echo "❌ Obfuscation failed for $file, error code: $?"
+      # Try to provide more details about the file
+      file "$file"
     fi
   done
 fi
