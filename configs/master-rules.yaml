@@ -1,13 +1,6 @@
 # -----------------------------------------------------------------------------
-# master-rules.yaml | Authoritative Policy for Network Traffic
-# Maintained by: PopdeuxRem
-# Version: 2.3.1
-# Last Modified: 2025-08-29
-# -----------------------------------------------------------------------------
-# NOTE:
-# - Replace credential placeholders (${...}) via deployment pipeline.
-# - MITM of financial / credential or banking domains may violate ToS or law.
-# - Highly sensitive retail banking domains intentionally excluded from MITM.
+# master-rules.yaml | Authoritative Policy for Network Traffic (Normalized)
+# Version: 2.3.1-normalized
 # -----------------------------------------------------------------------------
 
 definitions:
@@ -30,7 +23,7 @@ proxies:
       type: vless
       host: premiusa1.vpnjantit.com
       port: 10002
-      user: ${VLESS_UUID}
+      uuid: ${VLESS_UUID}
       tls: true
       ws: true
       ws_path: "/vpnjantit"
@@ -40,13 +33,12 @@ groups:
   US: [US-RESI, US-RESI2]
 
 rules:
-  # === Finance / Payments / Fintech ===
+  # --- Finance / Payments / Fintech ---
   - { <<: *us_domain_suffix, value: "affirm.com" }
   - { <<: *us_domain_suffix, value: "afterpay.com" }
   - { <<: *us_domain_suffix, value: "alipay.com" }
   - { <<: *us_domain_suffix, value: "americanexpress.com" }
   - { <<: *us_domain_suffix, value: "bankofamerica.com" }
-  - { <<: *us_domain_suffix, value: "blockchain.com" }
   - { <<: *us_domain_suffix, value: "capitalone.com" }
   - { <<: *us_domain_suffix, value: "cash.app" }
   - { <<: *us_domain_suffix, value: "chase.com" }
@@ -57,7 +49,6 @@ rules:
   - { <<: *us_domain_suffix, value: "interactivebrokers.com" }
   - { <<: *us_domain_suffix, value: "klarna.com" }
   - { <<: *us_domain_suffix, value: "kraken.com" }
-  - { <<: *us_domain_suffix, value: "link.com" }
   - { <<: *us_domain_suffix, value: "moonpay.com" }
   - { <<: *us_domain_suffix, value: "paypal.com" }
   - { <<: *us_domain_suffix, value: "payoneer.com" }
@@ -72,7 +63,7 @@ rules:
   - { <<: *us_domain_suffix, value: "wellsfargo.com" }
   - { <<: *us_domain_suffix, value: "zellepay.com" }
 
-  # === SIM / Identity / Virtual Number / Voice ===
+  # --- SIM / Identity ---
   - { <<: *us_domain_suffix, value: "2ndline.co" }
   - { <<: *us_domain_suffix, value: "burnerapp.com" }
   - { <<: *us_domain_suffix, value: "getsly.com" }
@@ -83,7 +74,7 @@ rules:
   - { <<: *us_domain_suffix, value: "textnow.com" }
   - { <<: *us_domain_suffix, value: "textplus.com" }
 
-  # === Social / Auth / Community / Messaging ===
+  # --- Social / Messaging ---
   - { <<: *us_domain_suffix, value: "anthropic.com" }
   - { <<: *us_domain_suffix, value: "claude.ai" }
   - { <<: *us_domain_suffix, value: "discord.com" }
@@ -105,17 +96,14 @@ rules:
   - { <<: *us_domain_suffix, value: "x.com" }
   - { <<: *us_domain_suffix, value: "zoom.us" }
 
-  # === Crypto / Blockchain / Exchanges / Explorers ===
+  # --- Crypto / Blockchain ---
   - { <<: *us_domain_suffix, value: "binance.com" }
   - { <<: *us_domain_suffix, value: "bitfinex.com" }
-  - { <<: *us_domain_suffix, value: "blockchain.com" }
   - { <<: *us_domain_suffix, value: "bybit.com" }
-  - { <<: *us_domain_suffix, value: "coinbase.com" }
   - { <<: *us_domain_suffix, value: "coingecko.com" }
   - { <<: *us_domain_suffix, value: "crypto.com" }
   - { <<: *us_domain_suffix, value: "etherscan.io" }
   - { <<: *us_domain_suffix, value: "gemini.com" }
-  - { <<: *us_domain_suffix, value: "kraken.com" }
   - { <<: *us_domain_suffix, value: "kucoin.com" }
   - { <<: *us_domain_suffix, value: "metamask.io" }
   - { <<: *us_domain_suffix, value: "okx.com" }
@@ -124,14 +112,14 @@ rules:
   - { <<: *us_domain_suffix, value: "solscan.io" }
   - { <<: *us_domain_suffix, value: "trustwallet.com" }
 
-  # === Streaming / Media / Entertainment / Sports ===
+  # --- Streaming / Media ---
   - { <<: *us_domain_suffix, value: "apple.com" }
   - { <<: *us_domain_suffix, value: "crunchyroll.com" }
   - { <<: *us_domain_suffix, value: "discoveryplus.com" }
   - { <<: *us_domain_suffix, value: "disneyplus.com" }
   - { <<: *us_domain_suffix, value: "espn.com" }
-  - { <<: *us_domain_suffix, value: "hbomax.com" }
   - { <<: *us_domain_suffix, value: "hbo.com" }
+  - { <<: *us_domain_suffix, value: "hbomax.com" }
   - { <<: *us_domain_suffix, value: "hulu.com" }
   - { <<: *us_domain_suffix, value: "max.com" }
   - { <<: *us_domain_suffix, value: "mlb.com" }
@@ -141,10 +129,9 @@ rules:
   - { <<: *us_domain_suffix, value: "peacocktv.com" }
   - { <<: *us_domain_suffix, value: "primevideo.com" }
   - { <<: *us_domain_suffix, value: "spotify.com" }
-  - { <<: *us_domain_suffix, value: "twitch.tv" }
   - { <<: *us_domain_suffix, value: "youtube.com" }
 
-  # === Dating / Relationships ===
+  # --- Dating ---
   - { <<: *us_domain_suffix, value: "bumble.com" }
   - { <<: *us_domain_suffix, value: "eharmony.com" }
   - { <<: *us_domain_suffix, value: "grindr.com" }
@@ -156,7 +143,7 @@ rules:
   - { <<: *us_domain_suffix, value: "tinder.com" }
   - { <<: *us_domain_suffix, value: "zoosk.com" }
 
-  # === Mail / Communications ===
+  # --- Mail / Comms ---
   - { <<: *us_domain_suffix, value: "fastmail.com" }
   - { <<: *us_domain_suffix, value: "gmail.com" }
   - { <<: *us_domain_suffix, value: "gmx.com" }
@@ -168,9 +155,8 @@ rules:
   - { <<: *us_domain_suffix, value: "ymail.com" }
   - { <<: *us_domain_suffix, value: "zoho.com" }
 
-  # === Dev / Cloud / AI / Infra / Collaboration ===
+  # --- Dev / Cloud / AI ---
   - { <<: *us_domain_suffix, value: "amazonaws.com" }
-  - { <<: *us_domain_suffix, value: "anthropic.com" }
   - { <<: *us_domain_suffix, value: "azure.com" }
   - { <<: *us_domain_suffix, value: "cloudflare.com" }
   - { <<: *us_domain_suffix, value: "digitalocean.com" }
@@ -189,57 +175,17 @@ rules:
   - { <<: *us_domain_suffix, value: "vercel.com" }
   - { <<: *us_domain_suffix, value: "zoom.us" }
 
-  # === Catch-All Fallbacks ===
+  # --- Catch-All Fallbacks ---
   - { type: GEOIP, value: "US", group: "US" }
-  - { type: MATCH, value: "all", group: "DIRECT" }
+  - { type: MATCH, group: "US" }
 
 mitm_hostnames:
-  - "*.api.anthropic.com"
-  - "*.anthropic.com"
-  - "*.binance.com"
-  - "*.bumble.com"
-  - "*.cash.app"
-  - "*.claude.ai"
-  - "*.coinbase.com"
-  - "*.crypto.com"
-  - "*.discord.com"
-  - "*.disneyplus.com"
-  - "*.dropbox.com"
-  - "*.etherscan.io"
-  - "*.gemini.com"
-  - "*.github.com"
-  - "*.gitlab.com"
-  - "*.gmail.com"
-  - "*.huggingface.co"
-  - "*.icloud.com"
-  - "*.instagram.com"
-  - "*.kraken.com"
-  - "*.metamask.io"
-  - "*.moonpay.com"
-  - "*.netflix.com"
-  - "*.notion.so"
-  - "*.okx.com"
+  # (Pruned example – keep only what you truly need to script/intercept)
   - "*.openai.com"
-  - "*.paypal.com"
-  - "*.phantom.app"
-  - "*.primevideo.com"
-  - "*.proton.me"
-  - "*.reddit.com"
-  - "*.slack.com"
-  - "*.snapchat.com"
-  - "*.spotify.com"
-  - "*.stripe.com"
-  - "*.telegram.org"
-  - "*.textnow.com"
-  - "*.tiktok.com"
-  - "*.tinder.com"
-  - "*.trustwallet.com"
-  - "*.twitter.com"
-  - "*.venmo.com"
-  - "*.wise.com"
-  - "*.yahoo.com"
-  - "*.youtube.com"
-  - "*.zoom.us"
+  - "*.anthropic.com"
+  - "api.github.com"
+  - "*.github.com"
+  - "*.huggingface.co"
 
 scripts:
   loader_url: "https://popdeuxrem.github.io/shadow-scripts/scripts/mitm-loader.js"
@@ -257,9 +203,6 @@ block_domains:
   - googletagmanager.com
   - logrocket.io
   - mixpanel.com
-  - m.stripe.com
-  - metrics.stripe.com
-  - r.stripe.com
   - segment.io
 
 external_rule_sets:
@@ -267,16 +210,9 @@ external_rule_sets:
   - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/facebook.list", group: *us_group }
   - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/github.list", group: *us_group }
   - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/instagram.list", group: *us_group }
-  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/jetbrains.list", group: *us_group }
-  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/linkedin.list", group: *us_group }
-  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/medium.list", group: *us_group }
   - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/openai.list", group: *us_group }
-  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/pornhub.list", group: *us_group }
   - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/reddit.list", group: *us_group }
   - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/telegram.list", group: *us_group }
   - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/twitter.list", group: *us_group }
   - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/whatsapp.list", group: *us_group }
-  - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/xvideos.list", group: *us_group }
   - { url: "https://raw.githubusercontent.com/dlisin/shadowrocket-config/refs/heads/master/domains/youtube.list", group: *us_group }
-
-# End of file
