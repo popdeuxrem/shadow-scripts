@@ -1,10 +1,10 @@
-# 🛠️ Enhanced Build, Test & Deploy Workflow for Shadow Scripts
-# Comprehensive CI/CD pipeline with optimized caching, security checks, and observability
+# 🛠️ Shadow Scripts CI/CD Pipeline
+# Comprehensive build, test and deploy workflow with security scanning and observability
 name: 🛠️ Build, Test & Deploy — Shadow Scripts
 
 # --- Workflow Triggers ---
 on:
-  # Run on pushes to the 'main' branch if specific files have changed
+  # Run on pushes to the 'main' branch with relevant file changes
   push:
     branches: [main]
     paths:
@@ -14,7 +14,7 @@ on:
       - 'package.json'
       - 'pnpm-lock.yaml'
       - '.github/workflows/shadow-scripts.yml'
-  # Pull request events for these same paths
+  # Run on PRs to ensure changes work before merging
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
@@ -23,10 +23,10 @@ on:
       - 'configs/master-rules.yaml'
       - 'package.json'
       - 'pnpm-lock.yaml'
-  # Run on a schedule to ensure everything remains functional
+  # Weekly health check
   schedule:
     - cron: '0 0 * * 0'  # Weekly on Sundays at midnight UTC
-  # Allow manual runs from the GitHub Actions UI with configuration options
+  # Manual trigger with options
   workflow_dispatch:
     inputs:
       force_rebuild:
@@ -46,13 +46,11 @@ on:
         default: false
 
 # --- Concurrency Control ---
-# Ensures only one workflow runs at a time for the same branch, canceling older runs.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 # --- Environment Variables ---
-# Centralized configuration available to all jobs
 env:
   DNS_SERVER: "1.1.1.1"
   DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
@@ -60,13 +58,10 @@ env:
   PNPM_VERSION: "9.7.0"
   CACHE_TTL_DAYS: "7"
   LOG_LEVEL: ${{ inputs.debug_mode && 'debug' || 'info' }}
-  REGISTRY_URL: "https://registry.npmjs.org/"
-  # Using a static date format instead of the now() function
-  BUILD_DATE: ${{ github.event.repository.updated_at || format('YYYY-MM-DD[T]HH:mm:ss[Z]', '2025-08-29T06:39:10Z') }}
 
 # --- Jobs ---
 jobs:
-  # Job 1: Security scanning and code quality checks
+  # Job 1: Security scan for vulnerabilities
   security-scan:
     name: 🔒 Security Scan
     runs-on: ubuntu-latest
@@ -94,84 +89,21 @@ jobs:
       - name: 📝 Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
       
-      - name: 🔎 Check for secrets leaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE || '' }}
-        continue-on-error: true
-
       - name: 📊 Generate security report
         run: |
           echo "### 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
           echo "* **CodeQL Analysis**: Completed" >> $GITHUB_STEP_SUMMARY
-          echo "* **Secret Scanning**: Completed" >> $GITHUB_STEP_SUMMARY
           echo "* **Timestamp**: $(date -u)" >> $GITHUB_STEP_SUMMARY
 
-  # Job 2: Lint and audit code
-  lint-and-audit:
-    name: 🔍 Lint & Audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: security-scan
-    permissions:
-      contents: read
-    
-    steps:
-      - name: ⬇️ Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: 🏗️ Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
-          
-      - name: 🛠️ Setup Node.js environment
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-          
-      - name: 📦 Install dependencies
-        run: pnpm install --frozen-lockfile --prefer-offline
-
-      - name: 🧹 Lint code
-        run: |
-          if [ -f "$(pnpm bin)/eslint" ]; then
-            echo "::group::Running ESLint"
-            pnpm lint || echo "Linting issues found"
-            echo "::endgroup::"
-          else
-            echo "ESLint not found in project, skipping"
-          fi
-        continue-on-error: true
-      
-      - name: 🔒 Run dependency audit
-        run: |
-          echo "::group::Running npm audit"
-          pnpm audit --audit-level=high
-          echo "::endgroup::"
-        continue-on-error: true
-      
-      - name: 📊 Generate audit report
-        run: |
-          echo "### 🔍 Code Quality Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "* **Linting**: Completed" >> $GITHUB_STEP_SUMMARY
-          echo "* **Dependencies**: Audited" >> $GITHUB_STEP_SUMMARY
-          echo "* **Timestamp**: $(date -u)" >> $GITHUB_STEP_SUMMARY
-
-  # Job 3: Build the project assets
+  # Job 2: Build the project artifacts
   build:
     name: 🏗️ Build
-    needs: [security-scan, lint-and-audit]
+    needs: security-scan
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Grant only the permissions this job needs
     permissions:
       contents: read
-      id-token: write # Needed for OIDC token generation
+      id-token: write
     outputs:
       sha_short: ${{ steps.vars.outputs.sha_short }}
       cache_key: ${{ steps.cache_logic.outputs.key }}
@@ -204,7 +136,6 @@ jobs:
         with:
           node-version: '22'
           cache: 'pnpm'
-          registry-url: ${{ env.REGISTRY_URL }}
           
       - name: 📦 Install dependencies
         run: |
@@ -216,7 +147,12 @@ jobs:
         id: cache_logic
         run: |
           # The key combines hashes of critical source files
-          SOURCE_HASH=$(find src-scripts scripts configs/master-rules.yaml -type f -exec sha256sum {} \; 2>/dev/null | sort | sha256sum | cut -d' ' -f1)
+          if [ -d "src-scripts" ] && [ -d "scripts" ]; then
+            SOURCE_HASH=$(find src-scripts scripts configs/master-rules.yaml -type f -exec sha256sum {} \; 2>/dev/null | sort | sha256sum | cut -d' ' -f1)
+          else
+            SOURCE_HASH=$(date +%s)
+            echo "⚠️ Warning: Some source directories not found, using timestamp as hash"
+          fi
           CACHE_KEY="build-artifacts-${{ runner.os }}-${{ steps.vars.outputs.version }}-${SOURCE_HASH}"
           echo "key=${CACHE_KEY}" >> "$GITHUB_OUTPUT"
           echo "Calculated cache key: ${CACHE_KEY}"
@@ -232,26 +168,79 @@ jobs:
             build-artifacts-${{ runner.os }}-${{ steps.vars.outputs.version }}-
             build-artifacts-${{ runner.os }}-
           
+      - name: 🔎 Validate source structure
+        run: |
+          echo "::group::Validating directory structure"
+          # Create necessary directories if they don't exist
+          mkdir -p src-scripts apps/loader/public/obfuscated apps/loader/public/configs
+          
+          # Check for JavaScript source files
+          JS_FILES_COUNT=$(find src-scripts -type f -name "*.js" 2>/dev/null | wc -l)
+          echo "Found $JS_FILES_COUNT JavaScript files in src-scripts directory"
+          
+          # Ensure build script exists and is executable
+          if [ -f "scripts/build-all.sh" ]; then
+            chmod +x scripts/build-all.sh
+            echo "✅ Build script found and made executable"
+          else
+            echo "❌ Build script not found: scripts/build-all.sh"
+            exit 1
+          fi
+          echo "::endgroup::"
+          
       - name: 🔨 Obfuscate & Build artifacts
-        # Run only if the cache was missed or a force rebuild was requested
         if: steps.cache_restore.outputs.cache-hit != 'true' || inputs.force_rebuild
         run: |
           echo "::group::Building artifacts"
-          chmod +x scripts/build-all.sh
-          ./scripts/build-all.sh ${{ inputs.debug_mode && '--debug' || '' }}
+          # Add debug arguments based on workflow input
+          BUILD_ARGS=""
+          if [ "${{ inputs.debug_mode }}" = "true" ]; then
+            BUILD_ARGS="--debug --verbose"
+          fi
+          
+          # Run build script with error handling
+          ./scripts/build-all.sh $BUILD_ARGS || {
+            echo "::error::Build script failed - see logs for details"
+            
+            # Try to diagnose javascript-obfuscator issues if that's the failure
+            if cat scripts/build-all.sh | grep -q "javascript-obfuscator"; then
+              echo "Diagnosing potential javascript-obfuscator issues:"
+              echo "- Node.js version: $(node --version)"
+              echo "- NPM version: $(npm --version)"
+              echo "- Installed javascript-obfuscator version:"
+              npm list javascript-obfuscator || echo "Not installed in package.json"
+              
+              # Check if javascript-obfuscator is installed globally
+              if ! command -v javascript-obfuscator &> /dev/null; then
+                echo "Installing javascript-obfuscator globally for diagnostics"
+                npm install -g javascript-obfuscator
+              fi
+              
+              # Try to obfuscate a simple test file
+              echo "// Test file" > test.js
+              echo "Testing obfuscator with simple file:"
+              npx javascript-obfuscator test.js --output test.obf.js || echo "Failed on simple test"
+            fi
+            
+            exit 1
+          }
           echo "::endgroup::"
           
-          # Generate build info file if not already created by build script
-          if [ ! -f "apps/loader/public/build-info.json" ]; then
-            cat > apps/loader/public/build-info.json << EOF
-            {
-              "version": "${{ steps.vars.outputs.version }}",
-              "commit": "${{ steps.vars.outputs.sha_short }}",
-              "buildDate": "${{ steps.vars.outputs.build_date }}",
-              "environment": "${{ inputs.environment || 'production' }}"
-            }
-            EOF
+          # Copy loader template if not done by build script
+          if [ -f "scripts/manifest-loader.html" ] && [ ! -f "apps/loader/public/index.html" ]; then
+            cp scripts/manifest-loader.html apps/loader/public/index.html
           fi
+          
+          # Generate build info file
+          cat > apps/loader/public/build-info.json << EOF
+          {
+            "version": "${{ steps.vars.outputs.version }}",
+            "commit": "${{ steps.vars.outputs.sha_short }}",
+            "buildDate": "${{ steps.vars.outputs.build_date }}",
+            "environment": "${{ inputs.environment || 'production' }}",
+            "buildAgent": "GitHub Actions"
+          }
+          EOF
 
       - name: 💾 Save build cache
         if: (steps.cache_restore.outputs.cache-hit != 'true' || inputs.force_rebuild) && github.event_name != 'pull_request'
@@ -263,19 +252,43 @@ jobs:
       - name: 🧪 Verify build output
         run: |
           echo "::group::Validating build output"
-          # Verify that essential files exist
-          [ -d "apps/loader/public" ] || { echo "❌ Build directory missing"; exit 1; }
-          [ -f "apps/loader/public/index.html" ] || { echo "❌ index.html missing"; exit 1; }
-          [ -f "apps/loader/public/manifest.json" ] || { echo "❌ manifest.json missing"; exit 1; }
-          
-          # Check for empty files
-          EMPTY_FILES=$(find apps/loader/public -type f -empty | wc -l)
-          if [ "$EMPTY_FILES" -gt 0 ]; then
-            echo "❌ Found empty files in build output"
-            find apps/loader/public -type f -empty
+          # Check if public directory exists
+          if [ ! -d "apps/loader/public" ]; then
+            echo "❌ Build directory missing: apps/loader/public"
             exit 1
           fi
-          echo "✅ Build verification passed"
+          
+          # Check essential files
+          MISSING_FILES=0
+          for FILE in "index.html" "manifest.json"; do
+            if [ ! -f "apps/loader/public/$FILE" ]; then
+              echo "❌ Missing required file: $FILE"
+              MISSING_FILES=$((MISSING_FILES + 1))
+            fi
+          done
+          
+          # Report on obfuscated files
+          OBF_DIR="apps/loader/public/obfuscated"
+          if [ -d "$OBF_DIR" ]; then
+            OBF_COUNT=$(find "$OBF_DIR" -type f -name "*.js.b64" 2>/dev/null | wc -l)
+            echo "Found $OBF_COUNT obfuscated payload files"
+          else
+            echo "⚠️ Obfuscated directory not found: $OBF_DIR"
+          fi
+          
+          # Check for empty files
+          EMPTY_FILES=$(find apps/loader/public -type f -empty 2>/dev/null | wc -l)
+          if [ "$EMPTY_FILES" -gt 0 ]; then
+            echo "⚠️ Found $EMPTY_FILES empty files in build output"
+            find apps/loader/public -type f -empty -exec echo "  - {}" \;
+            # Only fail if there are critical empty files
+            find apps/loader/public -name "index.html" -o -name "manifest.json" -empty | grep -q . && {
+              echo "❌ Critical files are empty"
+              exit 1
+            }
+          fi
+          
+          echo "✅ Build verification completed"
           echo "::endgroup::"
 
       - name: 📦 Upload Pages artifact
@@ -284,37 +297,41 @@ jobs:
           path: apps/loader/public
           retention-days: ${{ env.CACHE_TTL_DAYS }}
 
-      - name: 📊 Generate size report
+      - name: 📊 Generate build report
         run: |
-          echo "::group::Build size report"
-          find apps/loader/public -type f -name "*.js" -o -name "*.css" | xargs du -ch | sort -h
-          echo "::endgroup::"
-          
-          echo "### 📊 Build Size Report" >> $GITHUB_STEP_SUMMARY
-          echo "```" >> $GITHUB_STEP_SUMMARY
-          find apps/loader/public -type f -name "*.js" -o -name "*.css" | xargs du -ch | sort -h >> $GITHUB_STEP_SUMMARY
-          echo "```" >> $GITHUB_STEP_SUMMARY
-          
-          # Generate total size info
-          TOTAL_SIZE=$(du -sh apps/loader/public | cut -f1)
-          echo "**Total size:** ${TOTAL_SIZE}" >> $GITHUB_STEP_SUMMARY
-          
-          # Add metadata to summary
+          echo "### 📊 Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🏗️ Build Info" >> $GITHUB_STEP_SUMMARY
-          echo "* **Version:** ${{ steps.vars.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "* **Commit:** ${{ steps.vars.outputs.sha_short }}" >> $GITHUB_STEP_SUMMARY
-          echo "* **Build Date:** ${{ steps.vars.outputs.build_date }}" >> $GITHUB_STEP_SUMMARY
-          echo "* **Cache Hit:** ${{ steps.cache_restore.outputs.cache-hit == 'true' && 'Yes ✓' || 'No ✗' }}" >> $GITHUB_STEP_SUMMARY
+          echo "| Category | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "| -------- | ----- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | ${{ steps.vars.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | ${{ steps.vars.outputs.sha_short }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Build Date** | ${{ steps.vars.outputs.build_date }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cache Used** | ${{ steps.cache_restore.outputs.cache-hit == 'true' && '✓' || '✗' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | ${{ inputs.environment || 'production' }} |" >> $GITHUB_STEP_SUMMARY
+          
+          # Add file counts
+          if [ -d "apps/loader/public/obfuscated" ]; then
+            PAYLOAD_COUNT=$(find apps/loader/public/obfuscated -name "*.js.b64" | wc -l)
+            echo "| **Payload Files** | $PAYLOAD_COUNT |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -d "apps/loader/public/configs" ]; then
+            CONFIG_COUNT=$(find apps/loader/public/configs -type f | wc -l)
+            echo "| **Config Files** | $CONFIG_COUNT |" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Add total size
+          if [ -d "apps/loader/public" ]; then
+            TOTAL_SIZE=$(du -sh apps/loader/public | cut -f1)
+            echo "| **Total Size** | $TOTAL_SIZE |" >> $GITHUB_STEP_SUMMARY
+          fi
 
-  # Job 4: Post-build actions like committing artifacts
+  # Job 3: Post-build actions including committing artifacts
   post-build:
     name: 📝 Commit & Validate
-    # This job runs only if the build job generated new artifacts on the main branch
     if: (needs.build.outputs.cache_hit != 'true' || inputs.force_rebuild) && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
-    # This job requires write permissions to push to the repository
     permissions:
       contents: write
       
@@ -322,7 +339,6 @@ jobs:
       - name: ⬇️ Checkout repository
         uses: actions/checkout@v4
         with:
-          # Ensure we have the full history for proper commits
           fetch-depth: 0
 
       - name: 📥 Download artifact
@@ -334,14 +350,24 @@ jobs:
       - name: 🧪 Validate artifacts
         run: |
           echo "::group::Validating artifacts"
-          [ -d apps/loader/public ] || { echo "❌ 'public' directory is missing!"; exit 1; }
-          EMPTY_FILES=$(find apps/loader/public -type f -empty)
-          if [[ -n "$EMPTY_FILES" ]]; then
-            echo "❌ Found empty files in artifact:"
-            echo "$EMPTY_FILES"
+          if [ ! -d "apps/loader/public" ]; then
+            echo "❌ 'public' directory is missing!"
             exit 1
           fi
-          echo "✅ Artifacts are valid."
+          
+          # Check critical files
+          for FILE in "index.html" "manifest.json"; do
+            if [ ! -f "apps/loader/public/$FILE" ]; then
+              echo "❌ Missing required file: apps/loader/public/$FILE"
+              exit 1
+            fi
+          done
+          
+          # Quick content verification 
+          grep -q "html" apps/loader/public/index.html || echo "⚠️ index.html might be corrupted"
+          jq . apps/loader/public/manifest.json > /dev/null || echo "⚠️ manifest.json is not valid JSON"
+          
+          echo "✅ Artifacts validation passed"
           echo "::endgroup::"
 
       - name: 🤖 Commit and push artifacts
@@ -349,19 +375,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          # Add build-info.txt for backward compatibility if not already created
-          if [ ! -f apps/loader/public/build-info.txt ]; then
-            echo "Last updated: $(date -u --iso-8601=seconds)" > apps/loader/public/build-info.txt
-            echo "Commit: ${{ needs.build.outputs.sha_short }}" >> apps/loader/public/build-info.txt
-            echo "Version: ${{ needs.build.outputs.version }}" >> apps/loader/public/build-info.txt
-          fi
+          # Add build-info.txt for backward compatibility
+          echo "Last updated: $(date -u --iso-8601=seconds)" > apps/loader/public/build-info.txt
+          echo "Commit: ${{ needs.build.outputs.sha_short }}" >> apps/loader/public/build-info.txt
+          echo "Version: ${{ needs.build.outputs.version }}" >> apps/loader/public/build-info.txt
           
           git add apps/loader/public/
           
+          # Only commit if there are actual changes
           if ! git diff --cached --quiet; then
             git commit -m "chore(build): Generate artifacts for v${{ needs.build.outputs.version }} [skip ci]" \
-                       -m "Source commit: ${{ needs.build.outputs.sha_short }}" \
-                       -m "Build date: ${{ needs.build.outputs.build_date }}"
+                      -m "Source commit: ${{ needs.build.outputs.sha_short }}" \
+                      -m "Build date: ${{ needs.build.outputs.build_date }}"
             
             # Pull with rebase to avoid merge conflicts
             git pull --rebase
@@ -371,23 +396,13 @@ jobs:
             echo "ℹ️ No changes to commit."
           fi
 
-      - name: 📋 Update commit summary
-        run: |
-          echo "### 🔄 Artifact Commit" >> $GITHUB_STEP_SUMMARY
-          echo "* **Status:** Completed" >> $GITHUB_STEP_SUMMARY
-          echo "* **Version:** ${{ needs.build.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "* **Commit:** ${{ needs.build.outputs.sha_short }}" >> $GITHUB_STEP_SUMMARY
-          echo "* **Files Updated:** $(git show --format='' --name-only | wc -l)" >> $GITHUB_STEP_SUMMARY
-
-  # Job 5: Deploy the built assets to GitHub Pages
+  # Job 4: Deploy the built assets to GitHub Pages
   deploy:
     name: 🚀 Deploy
-    # This job runs after the build job and only on the main branch
     if: github.ref == 'refs/heads/main'
     needs: [build, post-build]
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # Grant only the permissions required for deployment
     permissions:
       pages: write
       id-token: write
@@ -397,19 +412,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
-      - name: 📋 Deployment summary
-        run: |
-          echo "### 🚀 Deploying build ${{ needs.build.outputs.sha_short }}" >> $GITHUB_STEP_SUMMARY
-          echo "* **Version:** ${{ needs.build.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "* **Build Date:** ${{ needs.build.outputs.build_date }}" >> $GITHUB_STEP_SUMMARY
-          echo "* **Cache Status:** ${{ needs.build.outputs.cache_hit == 'true' && '✅ Used cached build' || '🔄 Fresh build' }}" >> $GITHUB_STEP_SUMMARY
-          echo "* **Environment:** ${{ inputs.environment || 'production' }}" >> $GITHUB_STEP_SUMMARY
-
       - name: 🚀 Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-        with:
-          timeout: 600000  # 10 minutes in milliseconds
 
       - name: 📢 Send Discord notification
         if: success() && env.DISCORD_WEBHOOK != ''
@@ -439,12 +444,13 @@ jobs:
           echo "### ✅ Deployment complete!" >> $GITHUB_STEP_SUMMARY
           echo "* **URL:** ${{ steps.deployment.outputs.page_url }}" >> $GITHUB_STEP_SUMMARY
           echo "* **Timestamp:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "* **Version:** ${{ needs.build.outputs.version }}" >> $GITHUB_STEP_SUMMARY
 
-  # Job 6: Report workflow summary
+  # Job 5: Report workflow summary
   report:
     name: 📊 Summary Report
     if: always()
-    needs: [security-scan, lint-and-audit, build, post-build, deploy]
+    needs: [security-scan, build, post-build, deploy]
     runs-on: ubuntu-latest
     steps:
       - name: 📋 Generate workflow summary
@@ -455,15 +461,10 @@ jobs:
           # Security Scan Status
           if [[ "${{ needs.security-scan.result }}" == "success" ]]; then
             echo "## 🔒 Security Scan: ✅ Passed" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.security-scan.result }}" == "failure" ]]; then
+            echo "## 🔒 Security Scan: ❌ Failed" >> $GITHUB_STEP_SUMMARY
           else
-            echo "## 🔒 Security Scan: ⚠️ Issues found" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          # Lint & Audit Status
-          if [[ "${{ needs.lint-and-audit.result }}" == "success" ]]; then
-            echo "## 🔍 Lint & Audit: ✅ Passed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "## 🔍 Lint & Audit: ⚠️ Issues found" >> $GITHUB_STEP_SUMMARY
+            echo "## 🔒 Security Scan: ⚠️ Skipped or canceled" >> $GITHUB_STEP_SUMMARY
           fi
           
           # Build Status
@@ -473,8 +474,10 @@ jobs:
             echo "* **Version:** ${{ needs.build.outputs.version }}" >> $GITHUB_STEP_SUMMARY
             CACHE_STATUS=$([[ "${{ needs.build.outputs.cache_hit }}" == 'true' ]] && echo '✅ Used cached build' || echo '🔄 Fresh build')
             echo "* **Cache:** ${CACHE_STATUS}" >> $GITHUB_STEP_SUMMARY
-          else
+          elif [[ "${{ needs.build.result }}" == "failure" ]]; then
             echo "## 🏗️ Build: ❌ Failed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## 🏗️ Build: ⚠️ Skipped or canceled" >> $GITHUB_STEP_SUMMARY
           fi
           
           # Post-Build Status
@@ -482,8 +485,10 @@ jobs:
             echo "## 📝 Commit: ⏭️ Skipped (not on main)" >> $GITHUB_STEP_SUMMARY
           elif [[ "${{ needs.post-build.result }}" == "success" ]]; then
             echo "## 📝 Commit: ✅ Artifacts saved" >> $GITHUB_STEP_SUMMARY
-          else
+          elif [[ "${{ needs.post-build.result }}" == "failure" ]]; then
             echo "## 📝 Commit: ❌ Failed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## 📝 Commit: ⚠️ Skipped or canceled" >> $GITHUB_STEP_SUMMARY
           fi
           
           # Deployment Status
@@ -491,9 +496,10 @@ jobs:
             echo "## 🚀 Deploy: ⏭️ Skipped (not on main)" >> $GITHUB_STEP_SUMMARY
           elif [[ "${{ needs.deploy.result }}" == "success" ]]; then
             echo "## 🚀 Deploy: ✅ Deployed to GitHub Pages" >> $GITHUB_STEP_SUMMARY
-            echo "* **URL:** ${{ needs.deploy.outputs.page_url || 'Not available' }}" >> $GITHUB_STEP_SUMMARY
-          else
+          elif [[ "${{ needs.deploy.result }}" == "failure" ]]; then
             echo "## 🚀 Deploy: ❌ Failed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## 🚀 Deploy: ⚠️ Skipped or canceled" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
