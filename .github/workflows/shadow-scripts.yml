@@ -61,7 +61,8 @@ env:
   CACHE_TTL_DAYS: "7"
   LOG_LEVEL: ${{ inputs.debug_mode && 'debug' || 'info' }}
   REGISTRY_URL: "https://registry.npmjs.org/"
-  BUILD_DATE: ${{ format('{0:yyyy-MM-ddTHH:mm:ssZ}', github.event.repository.updated_at || now()) }}
+  # Using a static date format instead of the now() function
+  BUILD_DATE: ${{ github.event.repository.updated_at || format('YYYY-MM-DD[T]HH:mm:ss[Z]', '2025-08-29T06:39:10Z') }}
 
 # --- Jobs ---
 jobs:
