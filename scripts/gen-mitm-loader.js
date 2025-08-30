@@ -1,99 +1,75 @@
-// scripts/gen-mitm-loader.js
+#!/usr/bin/env node
+
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
-const OUTPUT = path.resolve(__dirname, "../apps/loader/public/scripts/mitm-loader.js");
+const PAYLOADS_DIR = "apps/loader/public/payloads";
+const OUTPUT_PATH = "apps/loader/public/scripts/mitm-loader.js";
 
-// Minimal query string parser for mobile JS engines
-function parseQuery(url) {
-  const out = {};
-  const q = url.indexOf("?") !== -1 ? url.split("?")[1] : "";
-  if (q) {
-    q.split("&").forEach(kv => {
-      const [k, v] = kv.split("=");
-      out[decodeURIComponent(k)] = v ? decodeURIComponent(v) : "";
-    });
-  }
-  return out;
-}
+const BASE_URL =
+  process.env.BASE_URL ||
+  "https://popdeuxrem.github.io/shadow-scripts/payloads";
 
-const loader = `/*
- * MITM Payload Loader (Mobile/Shadowrocket-safe)
- * Generated: ${(new Date()).toISOString()}
- * Auto-injects base64 payload(s) by ?inject=foo.js,bar.js or #inject=all
- */
+const allPayloads = [];
 
-let log = (msg) => { try { console.log("[LOADER] " + msg); } catch {} };
-let injected = [];
-
-function parseQuery(url) {
-  let out = {};
-  let q = url.indexOf("?") !== -1 ? url.split("?")[1] : "";
-  if (q) {
-    q.split("&").forEach(kv => {
-      let [k, v] = kv.split("=");
-      out[decodeURIComponent(k)] = v ? decodeURIComponent(v) : "";
-    });
-  }
-  return out;
-}
-
-function getInjectList(url, hash) {
-  let q = parseQuery(url || "");
-  let inject = q.inject || "";
-  if (!inject && hash && hash.startsWith("#inject="))
-    inject = decodeURIComponent(hash.slice(8));
-  if (!inject) return [];
-  return inject.trim().toLowerCase() === "all"
-    ? ["__ALL__"]
-    : inject.split(",").map(x => x.trim()).filter(Boolean);
-}
-
-async function injectPayload(name, base) {
-  // Only .js payloads
-  if (!/^[\\w.-]+\\.js$/.test(name)) { log("Rejected unsafe name " + name); return; }
-  const url = base + name + ".b64";
-  try {
-    log("Fetching " + url);
-    const r = await fetch(url, {cache: "no-cache"});
-    if (!r.ok) { log("HTTP " + r.status); return; }
-    const txt = (await r.text()).trim();
-    if (!txt) { log("Empty payload: " + name); return; }
-    const s = document.createElement("script");
-    s.textContent = atob(txt);
-    document.documentElement.appendChild(s);
-    log("Injected " + name);
-    injected.push(name);
-  } catch(e) { log("Fetch failed: " + e); }
-}
-
-(async function () {
-  try {
-    // Shadowrocket/Loon/Quantumult X-safe: use string logic for URLs
-    const href = typeof location !== "undefined" ? location.href : (typeof $request !== "undefined" ? $request.url : "");
-    const hash = typeof location !== "undefined" ? location.hash : "";
-    const base = href.replace(/\\/[^/]*$/, "/obfuscated/");
-    const manifestURL = base.replace(/\\/obfuscated\\/$/, "/manifest.json");
-    log("Manifest: " + manifestURL);
-    const r = await fetch(manifestURL, {cache: "no-cache"});
-    const arr = r.ok ? await r.json() : [];
-    const files = arr.filter(f => f.endsWith(".js.b64")).map(f => f.replace(/\\.js\\.b64$/, ".js"));
-    log("Payloads: " + files.length);
-    // Parse targets
-    const list = getInjectList(href, hash);
-    let targets = [];
-    if (list.length && list[0] === "__ALL__") {
-      targets = files;
-      log("Auto-inject: all (" + files.length + ")");
-    } else if (list.length) {
-      targets = files.filter(f => list.includes(f));
-      log("Auto-inject: " + targets.join(","));
+const walk = (dir, prefix = "") => {
+  const files = fs.readdirSync(dir);
+  for (const file of files) {
+    const fullPath = path.join(dir, file);
+    const relPath = path.join(prefix, file);
+    if (fs.statSync(fullPath).isDirectory()) {
+      walk(fullPath, relPath);
+    } else if (file.endsWith(".b64")) {
+      allPayloads.push(relPath.replace(/\\/g, "/"));
     }
-    for (const n of targets) await injectPayload(n, base);
-  } catch(e) { log("Loader error: " + e); }
-})();
+  }
+};
+
+walk(PAYLOADS_DIR);
+
+const payloadMap = allPayloads.reduce((acc, rel) => {
+  const name = rel.replace(/\.js\.b64$/, "").replace(/\.b64$/, "");
+  const url = `${BASE_URL}/${rel}`;
+  acc[name] = url;
+  return acc;
+}, {});
+
+const loaderScript = `
+// ==MITM LOADER==
+// Auto-generated: ${new Date().toISOString()}
+
+const PAYLOADS = ${JSON.stringify(payloadMap, null, 2)};
+
+const load = async (name) => {
+  const url = PAYLOADS[name];
+  if (!url) {
+    console.warn("[MITM] No payload found for:", name);
+    return;
+  }
+  try {
+    const res = await fetch(url);
+    const encoded = await res.text();
+    const raw = new Uint8Array(atob(encoded).split("").map(c => c.charCodeAt(0)));
+    const decompressed = new TextDecoder().decode(pako.ungzip(raw));
+    eval(decompressed);
+    console.log("[MITM] ✅ Loaded payload:", name);
+  } catch (err) {
+    console.error("[MITM] ❌ Failed to load:", name, err);
+  }
+};
+
+// Auto-execute by domain
+const hostname = location.hostname;
+for (const key in PAYLOADS) {
+  if (hostname.includes(key)) {
+    load(key);
+    break;
+  }
+}
 `;
 
-fs.mkdirSync(path.dirname(OUTPUT), { recursive: true });
-fs.writeFileSync(OUTPUT, loader);
-console.log("✅ mitm-loader.js generated");
+fs.mkdirSync(path.dirname(OUTPUT_PATH), { recursive: true });
+fs.writeFileSync(OUTPUT_PATH, loaderScript);
+
+console.log(`✅ mitm-loader.js generated: ${OUTPUT_PATH}`);
