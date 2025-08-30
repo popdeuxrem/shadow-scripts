@@ -9,6 +9,7 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+
     steps:
       - name: ⬇️ Checkout repository
         uses: actions/checkout@v4
@@ -39,10 +40,8 @@ jobs:
           ./scripts/build-all.sh
 
       - name: 📤 Upload Pages artifact
-        # Use the dedicated action for GitHub Pages artifacts
         uses: actions/upload-pages-artifact@v3
         with:
-          # This is the directory that will be deployed
           path: ./apps/loader/public
 
   deploy:
@@ -51,8 +50,8 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      pages: write      # to deploy to Pages
-      id-token: write   # to verify the deployment originates from an Actions workflow
+      pages: write
+      id-token: write
 
     environment:
       name: github-pages
@@ -61,5 +60,4 @@ jobs:
     steps:
       - name: 🚀 Deploy to GitHub Pages
         id: deployment
-        # This action will automatically find and deploy the artifact from the 'build' job
         uses: actions/deploy-pages@v4
