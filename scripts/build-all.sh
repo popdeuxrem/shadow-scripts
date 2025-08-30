@@ -1,127 +1,156 @@
 #!/usr/bin/env bash
+# ───────────────────────────────────────────────────────────────
+# build-all.sh — Orchestrates config + payload builds
+#   • Cleans old artifacts
+#   • Runs all generators (conf / mobileconfig / mitm-loader)
+#   • Obfuscates payloads into .js.b64
+#   • Writes manifest.json
+#   • Injects cache-busting commit hash
+# ───────────────────────────────────────────────────────────────
+
 set -euo pipefail
 IFS=$'\n\t'
 
-# ────────────────────────────────────────────────────────────────────────────────
-# build-all.sh ─ Orchestrates config + payload builds
-#   • Cleans old artifacts
-#   • Runs all generators (conf / mobileconfig / mitm-loader)
-#   • Obfuscates payloads into .js.b64 via npx/pnpm dlx
-#   • Writes manifest.json
-#   • Generates QR codes
-# ────────────────────────────────────────────────────────────────────────────────
+# ─── Functions ───────────────────────────────────────────────────────
+log() { echo -e "\033[1;36m$1\033[0m"; }
+warn() { echo -e "\033[1;33m⚠️ $1\033[0m"; }
+error() { echo -e "\033[1;31m❌ $1\033[0m"; exit 1; }
+success() { echo -e "\033[1;32m✅ $1\033[0m"; }
+separator() { echo -e "\n\033[1;35m=== [$1/$TOTAL_STEPS] $2 ===\033[0m\n"; }
+check_command() { command -v "$1" >/dev/null 2>&1 || error "Required command '$1' not found"; }
 
+# ─── Configuration ──────────────────────────────────────────────────
 TOTAL_STEPS=9
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_DIR="$ROOT_DIR/src-scripts"
 PUBLIC_DIR="$ROOT_DIR/apps/loader/public"
 CONF_DIR="$PUBLIC_DIR/configs"
 OBF_DIR="$PUBLIC_DIR/obfuscated"
-QR_DIR="$PUBLIC_DIR/qr"
-BUILD_ID="$(date +%Y%m%d%H%M%S)"
-GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo "dev-$BUILD_ID")"
-export GIT_COMMIT
+TEMP_DIR="$(mktemp -d)"
+BUILD_START=$(date +%s)
 
-echo "🔧 build-all.sh started (commit: $GIT_COMMIT)"
-echo "--------------------------------------"
+# ─── Environment validation ─────────────────────────────────────────
+check_command node
+check_command jq
+check_command base64
+check_command git
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
-log(){ echo -e "\033[1;36m$1\033[0m"; }
-warn(){ echo -e "\033[1;33m⚠️ $1\033[0m"; }
-error(){ echo -e "\033[1;31m❌ $1\033[0m"; exit 1; }
-success(){ echo -e "\033[1;32m✅ $1\033[0m"; }
-separator(){ echo -e "\n\033[1;35m=== [$1/$TOTAL_STEPS] $2 ===\033[0m\n"; }
-
-# Detect obfuscator command
-if command -v npx &>/dev/null; then
-  OBF_CMD="npx --yes javascript-obfuscator"
-elif command -v pnpm &>/dev/null; then
-  OBF_CMD="pnpm dlx javascript-obfuscator"
+# detect obfuscator
+if command -v javascript-obfuscator >/dev/null 2>&1; then
+  OBFUSCATOR="javascript-obfuscator"
+elif [[ -x "./node_modules/.bin/javascript-obfuscator" ]]; then
+  OBFUSCATOR="./node_modules/.bin/javascript-obfuscator"
 else
-  error "Neither npx nor pnpm found—cannot run javascript-obfuscator"
+  warn "javascript-obfuscator not found, will fallback to pnpm dlx"
+  OBFUSCATOR="pnpm dlx javascript-obfuscator"
 fi
 
-# ─── 1. Clean ────────────────────────────────────────────────────────────────
-separator 1 "Cleaning public artifacts"
-rm -rf "$CONF_DIR" "$OBF_DIR" "$QR_DIR"
-mkdir -p "$CONF_DIR" "$OBF_DIR" "$QR_DIR"
+# ─── Metadata ───────────────────────────────────────────────────────
+BUILD_ID="$(date +%Y%m%d%H%M%S)"
+BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-# ─── 2. Obfuscate payloads ──────────────────────────────────────────────────
-separator 2 "Obfuscating JS payloads"
-shopt -s globstar nullglob
-js_files=( "$SRC_DIR"/**/*.js )
-if [[ ${#js_files[@]} -eq 0 ]]; then
-  warn "No JS payloads found"
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  GIT_COMMIT="$(git rev-parse --short HEAD)"
+  GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 else
-  for file in "${js_files[@]}"; do
-    [[ -s "$file" ]] || { warn "Skipping empty: $file"; continue; }
-    name="$(basename "$file" .js)"
-    obf="$OBF_DIR/${name}.ob.js"
-    b64="$OBF_DIR/${name}.js.b64"
-    log "🔒 $file → $b64"
-    $OBF_CMD "$file" --output "$obf" \
+  GIT_COMMIT="dev-$BUILD_ID"
+  GIT_BRANCH="unknown"
+fi
+
+VERSION="0.0.0"
+if [[ -f "$ROOT_DIR/package.json" ]]; then
+  VERSION=$(node -p "require('$ROOT_DIR/package.json').version || '0.0.0'" || echo "0.0.0")
+fi
+
+# ─── 1. Clean ──────────────────────────────────────────────────
+separator 1 "Cleaning public artifacts"
+rm -rf "$CONF_DIR" "$OBF_DIR"
+mkdir -p "$CONF_DIR" "$OBF_DIR" "$PUBLIC_DIR"
+
+# ─── 2. Config generators ──────────────────────────────────────
+separator 2 "Generating configs"
+GENERATORS=(gen-shadowrocket.js gen-stash.js gen-loon.js gen-mobileconfig.js)
+for gen in "${GENERATORS[@]}"; do
+  if [[ -f "$ROOT_DIR/scripts/$gen" ]]; then
+    log "⚙️ Running $gen"
+    node "$ROOT_DIR/scripts/$gen" || warn "Generator failed: $gen"
+  fi
+done
+
+# ─── 3. Obfuscate payloads ─────────────────────────────────────
+separator 3 "Obfuscating payloads"
+shopt -s globstar nullglob
+for file in "$SRC_DIR"/**/*.js; do
+  base="$(basename "$file" .js)"
+  obf="$OBF_DIR/${base}.ob.js"
+  b64="$OBF_DIR/${base}.js.b64"
+
+  log "🔒 Obfuscating $file → $b64"
+  if $OBFUSCATOR "$file" \
+      --output "$obf" \
       --compact true \
       --self-defending true \
       --control-flow-flattening true \
       --disable-console-output true \
       --string-array true \
-      --string-array-encoding base64 \
-      || { warn "Obfuscation failed: $file"; continue; }
+      --string-array-encoding base64; then
     base64 "$obf" > "$b64"
-    [[ -s "$b64" ]] || { warn "B64 empty: $b64"; continue; }
-  done
-fi
+    success "Obfuscated: $file"
+  else
+    warn "Obfuscation failed: $file"
+  fi
+done
 shopt -u globstar nullglob
 
-# ─── 3. MITM loader & manifest ──────────────────────────────────────────────
-separator 3 "Generating MITM loader & manifest"
-node scripts/gen-mitm-loader.js \
-  --hash="$GIT_COMMIT" \
-  --version="$(node -p "require('./package.json').version")" \
-  --date="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+# ─── 4. Manifest ───────────────────────────────────────────────
+separator 4 "Writing manifest.json"
+MANIFEST_FILE="$PUBLIC_DIR/manifest.json"
+FILES=$(ls "$OBF_DIR"/*.js.b64 2>/dev/null || echo "")
+jq -n \
+  --arg version "$VERSION" \
+  --arg commit "$GIT_COMMIT" \
+  --arg branch "$GIT_BRANCH" \
+  --arg buildDate "$BUILD_DATE" \
+  --argjson files "$(printf '%s\n' $FILES | jq -R . | jq -s .)" \
+  '{version:$version, commit:$commit, branch:$branch, buildDate:$buildDate, files:$files}' \
+  > "$MANIFEST_FILE"
 
-# ─── 4. Shadowrocket config ────────────────────────────────────────────────
-separator 4 "Generate Shadowrocket config"
-node scripts/gen-shadowrocket.js \
-  --input configs/master-rules.yaml \
-  --output "$CONF_DIR/shadowrocket.conf" \
-  --emit-json --annotate --split-rules --final-group US
-
-# ─── 5. Stash config ────────────────────────────────────────────────────────
-separator 5 "Generate Stash config"
-node scripts/gen-stash.js \
-  --input configs/master-rules.yaml \
-  --output "$CONF_DIR/stash.conf" \
-  --final-group US
-
-# ─── 6. Loon config ────────────────────────────────────────────────────────
-separator 6 "Generate Loon config"
-node scripts/gen-loon.js \
-  --input configs/master-rules.yaml \
-  --output "$CONF_DIR/loon.conf" \
-  --final-group US
-
-# ─── 7. Tunna config ───────────────────────────────────────────────────────
-separator 7 "Generate Tunna config"
-node scripts/gen-tunna.js \
-  --input configs/master-rules.yaml \
-  --output "$CONF_DIR/tunna.conf" \
-  --final-group US
-
-# ─── 8. iOS mobileconfig ──────────────────────────────────────────────────
-separator 8 "Generate Mobileconfig"
-node scripts/gen-mobileconfig.js \
-  --input "$CONF_DIR/shadowrocket.conf" \
-  --output "$PUBLIC_DIR/shadow_config.mobileconfig" \
-  --group-name "PopdeuxRem US"
-
-# ─── 9. QR codes ───────────────────────────────────────────────────────────
-separator 9 "Generate QR codes"
-if command -v qrcode-terminal &>/dev/null; then
-  qrcode-terminal "$PUBLIC_DIR/shadow_config.mobileconfig" > "$QR_DIR/shadowrocket.txt"
-  qrcode-terminal "$CONF_DIR/stash.conf" > "$QR_DIR/stash.txt"
-else
-  warn "qrcode-terminal not found, skipping QR codes"
+# ─── 5. Loader assets ──────────────────────────────────────────
+separator 5 "Generating mitm-loader.js"
+if [[ -f "$ROOT_DIR/scripts/gen-mitm-loader.js" ]]; then
+  node "$ROOT_DIR/scripts/gen-mitm-loader.js" --hash="$GIT_COMMIT" --version="$VERSION" --date="$BUILD_DATE"
 fi
 
-success "Build complete (commit: $GIT_COMMIT)"
+# ─── 6. Static templates ───────────────────────────────────────
+separator 6 "Copying templates"
+for tpl in manifest-loader.html catalog-template.html; do
+  if [[ -f "$ROOT_DIR/scripts/$tpl" ]]; then
+    target="$PUBLIC_DIR/${tpl/-template/}"
+    cp "$ROOT_DIR/scripts/$tpl" "$target"
+    sed -i.bak "s/{{VERSION}}/$VERSION/g; s/{{BUILD_DATE}}/$BUILD_DATE/g; s/{{COMMIT}}/$GIT_COMMIT/g" "$target"
+    rm -f "$target.bak"
+  fi
+done
+
+# ─── 7. Validation ─────────────────────────────────────────────
+separator 7 "Validating artifacts"
+find "$PUBLIC_DIR" -type f -empty -print && warn "Found empty files"
+
+# ─── 8. Build info ─────────────────────────────────────────────
+separator 8 "Creating build-info.json"
+cat > "$PUBLIC_DIR/build-info.json" <<EOF
+{
+  "version": "$VERSION",
+  "buildId": "$BUILD_ID",
+  "buildDate": "$BUILD_DATE",
+  "gitCommit": "$GIT_COMMIT",
+  "gitBranch": "$GIT_BRANCH"
+}
+EOF
+
+# ─── 9. Summary ────────────────────────────────────────────────
+separator 9 "Build Summary"
+log "📦 Version: $VERSION"
+log "🔑 Commit: $GIT_COMMIT"
+log "📂 Output: $PUBLIC_DIR"
+success "Build complete."
