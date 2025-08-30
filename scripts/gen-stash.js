@@ -1,122 +1,138 @@
 #!/usr/bin/env node
+/**
+ * gen-stash.js
+ * -----------------------------------------------------------------------------
+ * Stash Configuration Generator
+ *
+ * Author: PopdeuxRem
+ * Version: 3.0.0
+ *
+ * Reads configs/master-rules.yaml and generates a stash-compatible config file
+ * in apps/loader/public/configs/stash.yaml
+ */
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const yaml = require('js-yaml');
+const fs = require("fs");
+const path = require("path");
+const yaml = require("js-yaml");
+const crypto = require("crypto");
 
-const LOADER_BASE = 'https://popdeuxrem.github.io/shadow-scripts/index.html';
-const MANIFEST_PATH = path.resolve(__dirname, '../apps/loader/public/manifest.json');
-const MASTER_RULES_PATH = path.resolve(__dirname, '../configs/master-rules.yaml');
-const OUTPUT_PATH = path.resolve(__dirname, '../apps/loader/public/configs/stash.yaml');
+const ROOT = path.resolve(__dirname, "..");
+const INPUT_PATH = path.join(ROOT, "configs/master-rules.yaml");
+const OUTPUT_DIR = path.join(ROOT, "apps/loader/public/configs");
+const OUTPUT_FILE = path.join(OUTPUT_DIR, "stash.yaml");
 
-function createProxy({ name, loaderURL }) {
-  return {
-    name,
-    type: 'http',
-    url: loaderURL,
-    interval: 3600,
-    method: 'GET',
-    path: '/',
-    headers: {
-      'User-Agent': 'Quantum-Stash-Agent'
-    }
-  };
+function sha256(content) {
+  return crypto.createHash("sha256").update(content).digest("hex");
 }
 
-function createScriptProxy({ name, loaderURL }) {
-  return {
-    name: `${name}-script`,
-    type: 'script',
-    url: loaderURL,
-    interval: 3600,
-    parse: false,
-    timeout: 10
-  };
+function loadYaml(file) {
+  if (!fs.existsSync(file)) {
+    console.error(`❌ Input YAML not found: ${file}`);
+    process.exit(1);
+  }
+  try {
+    return yaml.load(fs.readFileSync(file, "utf8")) || {};
+  } catch (e) {
+    console.error(`❌ Failed to parse ${file}: ${e.message}`);
+    process.exit(1);
+  }
 }
 
-function generateLoaderURL(target, version) {
-  const id = crypto.randomUUID().slice(0, 8);
-  return `${LOADER_BASE}?t=${encodeURIComponent(target)}&v=${version}#${id}`;
-}
+function buildStashConfig(master) {
+  const proxies = [];
+  const proxyGroups = [];
+  const rules = [];
 
-function buildProxyGroup(proxies) {
-  return [
-    {
-      name: 'All',
-      type: 'select',
-      proxies: proxies.map((p) => p.name)
-    }
-  ];
-}
+  // --- Proxies ---
+  for (const [region, entries] of Object.entries(master.proxies || {})) {
+    for (const proxy of entries) {
+      const norm = { ...proxy };
 
-function transformRules(masterRules) {
-  const ruleLines = [];
-
-  if (masterRules?.rules?.length) {
-    for (const rule of masterRules.rules) {
-      switch (rule.type) {
-        case 'DOMAIN-SUFFIX':
-          ruleLines.push(`  - DOMAIN-SUFFIX,${rule.domain},All`);
-          break;
-        case 'DOMAIN-KEYWORD':
-          ruleLines.push(`  - DOMAIN-KEYWORD,${rule.keyword},All`);
-          break;
-        case 'IP-CIDR':
-          ruleLines.push(`  - IP-CIDR,${rule.cidr},All`);
-          break;
-        case 'SCRIPT':
-          ruleLines.push(`  - RULE-SCRIPT,${rule.name}-script`);
+      // Normalize types for Stash
+      switch (norm.type) {
+        case "socks5":
+        case "http":
+        case "https":
+        case "ss":
+        case "vmess":
+        case "vless":
+        case "trojan":
+        case "tuic":
+        case "hysteria":
+        case "hysteria2":
           break;
         default:
-          break;
+          console.warn(`⚠️ Unsupported proxy type in stash: ${norm.type}`);
+          continue;
       }
+      proxies.push(norm);
     }
   }
 
-  ruleLines.push('  - MATCH,All');
-  return ruleLines;
-}
-
-function buildStashYaml(manifest, masterRules) {
-  const proxies = [];
-  const scriptProxies = [];
-
-  for (const target of manifest.targets) {
-    const url = generateLoaderURL(target.name, manifest.version);
-    proxies.push(createProxy({ name: target.name, loaderURL: url }));
-    scriptProxies.push(createScriptProxy({ name: target.name, loaderURL: url }));
+  // --- Groups ---
+  for (const [name, members] of Object.entries(master.groups || {})) {
+    proxyGroups.push({
+      name,
+      type: "select",
+      proxies: members || [],
+    });
   }
 
-  const proxyGroups = buildProxyGroup(proxies);
-  const rules = transformRules(masterRules);
+  // --- Rules ---
+  for (const rule of master.rules || []) {
+    if (typeof rule === "object" && rule.type && rule.value) {
+      rules.push(`${rule.type},${rule.value},${rule.group || "DIRECT"}`);
+    }
+  }
 
-  const stash = {
-    proxies: [...proxies, ...scriptProxies],
-    'proxy-groups': proxyGroups,
-    rules
+  // External rules
+  for (const ext of master.external_rule_sets || []) {
+    if (ext.url && ext.group) {
+      rules.push(`RULE-SET,${ext.url},${ext.group}`);
+    }
+  }
+
+  // Block rules
+  for (const d of master.block_domains || []) {
+    rules.push(`DOMAIN-SUFFIX,${d},REJECT`);
+  }
+
+  // Ensure final rule
+  if (!rules.some(r => r.startsWith("FINAL,"))) {
+    rules.push(`FINAL,US`);
+  }
+
+  return {
+    port: 7890,
+    socks-port: 7891,
+    allow-lan: true,
+    mode: "rule",
+    log-level: "info",
+    dns: {
+      enable: true,
+      listen: "0.0.0.0:53",
+      nameserver: ["1.1.1.1", "8.8.8.8"],
+    },
+    proxies,
+    "proxy-groups": proxyGroups,
+    rules,
   };
-
-  return yaml.dump(stash, { noRefs: true, lineWidth: 120 });
 }
 
 function main() {
-  if (!fs.existsSync(MANIFEST_PATH)) {
-    console.error(`❌ manifest.json missing: ${MANIFEST_PATH}`);
-    process.exit(1);
-  }
+  console.log("⚙️ Generating stash.yaml...");
+  const master = loadYaml(INPUT_PATH);
+  const stashConfig = buildStashConfig(master);
 
-  const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf-8'));
-  const masterRules = fs.existsSync(MASTER_RULES_PATH)
-    ? yaml.load(fs.readFileSync(MASTER_RULES_PATH, 'utf-8'))
-    : null;
+  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+  fs.writeFileSync(OUTPUT_FILE, yaml.dump(stashConfig, { noRefs: true }));
 
-  const output = buildStashYaml(manifest, masterRules);
-
-  fs.mkdirSync(path.dirname(OUTPUT_PATH), { recursive: true });
-  fs.writeFileSync(OUTPUT_PATH, output, 'utf-8');
-
-  console.log(`✅ stash.yaml written to ${OUTPUT_PATH}`);
+  console.log(`✅ stash.yaml generated: ${OUTPUT_FILE}`);
+  console.log(`   SHA256: ${sha256(fs.readFileSync(OUTPUT_FILE))}`);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = { buildStashConfig };
