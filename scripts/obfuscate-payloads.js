@@ -1,71 +1,61 @@
 #!/usr/bin/env node
 
-const fs = require("fs");
-const path = require("path");
-const { execSync } = require("child_process");
-const zlib = require("zlib");
-const process = require("process");
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
 
-const obfuscatorBin = "javascript-obfuscator";
-
-const SRC_DIR = process.argv.includes("--src")
-  ? process.argv[process.argv.indexOf("--src") + 1]
-  : "src-scripts";
-
-const OUT_DIR = process.argv.includes("--out")
-  ? process.argv[process.argv.indexOf("--out") + 1]
-  : "apps/loader/public/payloads";
-
-const TEMP_DIR = path.join(".build", "temp-obfuscated");
-
-if (!fs.existsSync(SRC_DIR)) {
-  console.error(`❌ Source dir "${SRC_DIR}" not found`);
-  process.exit(1);
-}
-
-fs.rmSync(TEMP_DIR, { recursive: true, force: true });
-fs.mkdirSync(TEMP_DIR, { recursive: true });
-fs.mkdirSync(OUT_DIR, { recursive: true });
+const SRC_DIR = 'src-scripts';
+const OUT_DIR = '.build/temp-obfuscated';
+const GIT_COMMIT = process.env.GIT_COMMIT || 'dev';
 
 const getAllJsFiles = (dir) => {
-  return fs.readdirSync(dir).flatMap((file) => {
-    const full = path.join(dir, file);
-    if (fs.statSync(full).isDirectory()) return getAllJsFiles(full);
-    if (file.endsWith(".js")) return [full];
-    return [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  return entries.flatMap(entry => {
+    const fullPath = path.join(dir, entry.name);
+    return entry.isDirectory() ? getAllJsFiles(fullPath) : (fullPath.endsWith('.js') ? [fullPath] : []);
   });
 };
 
-const encodeBase64Gzip = (buffer) =>
-  zlib.gzipSync(buffer).toString("base64");
+const resolveObfuscatorBinary = () => {
+  try {
+    return execSync('which javascript-obfuscator').toString().trim();
+  } catch {
+    const fallback = path.resolve(__dirname, '../node_modules/.bin/javascript-obfuscator');
+    if (fs.existsSync(fallback)) return fallback;
+    console.error('\n❌ javascript-obfuscator not found. Install it via:\n\n  pnpm add -D javascript-obfuscator\n');
+    process.exit(1);
+  }
+};
 
-const relPath = (file) =>
-  path.relative(SRC_DIR, file).replace(/\\/g, "/");
+const obfuscator = resolveObfuscatorBinary();
+const files = getAllJsFiles(SRC_DIR);
 
-const allFiles = getAllJsFiles(SRC_DIR);
+console.log(`📦 Found ${files.length} .js files to process...\n`);
 
-console.log(`📦 Found ${allFiles.length} .js files to process...\n`);
+files.forEach((inputPath) => {
+  const relPath = path.relative(SRC_DIR, inputPath);
+  const outPath = path.join(OUT_DIR, relPath);
+  const outDir = path.dirname(outPath);
 
-for (const file of allFiles) {
-  const relative = relPath(file);
-  const tempOutPath = path.join(TEMP_DIR, relative);
-  const finalOutPath = path.join(OUT_DIR, relative + ".b64");
+  const tempPath = inputPath.replace(/\.js$/, '-obfuscated.js');
+  const original = fs.readFileSync(inputPath, 'utf8');
+  const withHash = `// Build Commit: ${GIT_COMMIT}\n${original}`;
 
-  fs.mkdirSync(path.dirname(tempOutPath), { recursive: true });
+  fs.mkdirSync(path.dirname(tempPath), { recursive: true });
+  fs.writeFileSync(tempPath, withHash, 'utf8');
+  fs.mkdirSync(outDir, { recursive: true });
 
-  console.log(`⚙️  Obfuscating ${relative}...`);
-  execSync(
-    `${obfuscatorBin} "${file}" --output "${tempOutPath}" --compact true --self-defending true --control-flow-flattening true --string-array true`,
-    { stdio: "inherit" }
-  );
+  console.log(`⚙️  Obfuscating ${relPath}...`);
+  try {
+    execSync(
+      `${obfuscator} "${tempPath}" --output "${outPath}" ` +
+      '--compact true --self-defending true --control-flow-flattening true --string-array true',
+      { stdio: 'inherit' }
+    );
+    fs.unlinkSync(tempPath); // clean up
+  } catch (err) {
+    console.error(`❌ Failed to obfuscate ${relPath}`, err.message);
+  }
+});
 
-  const raw = fs.readFileSync(tempOutPath);
-  const encoded = encodeBase64Gzip(raw);
-
-  fs.mkdirSync(path.dirname(finalOutPath), { recursive: true });
-  fs.writeFileSync(finalOutPath, encoded);
-
-  console.log(`✅ Output: ${finalOutPath}`);
-}
-
-console.log("\n🎉 All scripts obfuscated, gzipped, and base64-encoded.");
+console.log('\n✅ All payloads obfuscated and cleaned up.\n');
