@@ -1,0 +1,11 @@
+DOMAIN-SUFFIX,googletagmanager.com
+DOMAIN-SUFFIX,google-analytics.com
+DOMAIN-SUFFIX,static.cloudflareinsights.com
+DOMAIN-SUFFIX,segment.io
+DOMAIN-SUFFIX,sentry.io
+DOMAIN-SUFFIX,logrocket.io
+DOMAIN-SUFFIX,amplitude.com
+DOMAIN-SUFFIX,launchdarkly.com
+DOMAIN-SUFFIX,datadoghq.com
+DOMAIN-SUFFIX,cdn.jsdelivr.net
+DOMAIN-SUFFIX,polyfill.io

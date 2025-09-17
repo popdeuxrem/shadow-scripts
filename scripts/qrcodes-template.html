@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Shadow QR Terminal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      background: #000;
+      color: #00ff9c;
+      font-family: "Fira Code", monospace;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    header {
+      padding: 12px;
+      background: linear-gradient(to right, #001f1f, #003333);
+      border-bottom: 1px solid #004d4d;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      font-weight: bold;
+    }
+    #console {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 16px;
+      position: relative;
+    }
+    #console::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(0,255,156,0.05) 0px,
+        rgba(0,255,156,0.05) 1px,
+        transparent 2px,
+        transparent 4px
+      );
+      pointer-events: none;
+    }
+    .card {
+      background: #001111;
+      border: 1px solid #00ff9c;
+      padding: 12px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.2s ease;
+    }
+    .card:hover {
+      transform: scale(1.05);
+      z-index: 10;
+    }
+    .card img {
+      width: 100%;
+      height: auto;
+      display: block;
+      margin: 0 auto 8px;
+      filter: drop-shadow(0 0 4px #00ff9c);
+    }
+    .filename {
+      font-size: 13px;
+      color: #80ffc9;
+      margin-bottom: 4px;
+      word-break: break-all;
+    }
+    .meta {
+      font-size: 11px;
+      color: #33ffb5;
+      word-break: break-all;
+    }
+    #search {
+      background: #001f1f;
+      border: 1px solid #00ff9c;
+      color: #00ff9c;
+      padding: 6px 8px;
+      font-family: inherit;
+      font-size: 14px;
+      outline: none;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <header>▌ SHADOW-SCRIPTS QR TERMINAL ▐</header>
+  <input type="text" id="search" placeholder="Filter QR codes by filename, sha, or type..." />
+  <div id="console"></div>
+
+  <script>
+    async function loadCatalog() {
+      try {
+        const res = await fetch("./qrcodes/catalog.json", { cache: "no-store" });
+        if (!res.ok) throw new Error("Failed to fetch catalog.json");
+        return res.json();
+      } catch (e) {
+        document.getElementById("console").textContent =
+          "[!] Failed to load qrcodes/catalog.json\n" + e.message;
+        throw e;
+      }
+    }
+
+    function renderCatalog(catalog, filter="") {
+      const grid = document.getElementById("console");
+      grid.innerHTML = "";
+      const filterLower = filter.toLowerCase();
+
+      for (const item of catalog.items) {
+        if (
+          filter &&
+          !item.filename.toLowerCase().includes(filterLower) &&
+          !(item.sha256 || "").toLowerCase().includes(filterLower) &&
+          !(item.type || "").toLowerCase().includes(filterLower)
+        ) continue;
+
+        const card = document.createElement("div");
+        card.className = "card";
+
+        const img = document.createElement("img");
+        img.src = item.png.replace(/^.*apps\\//, "./apps/"); // relative path fix if needed
+        img.alt = item.filename;
+        card.appendChild(img);
+
+        const fname = document.createElement("div");
+        fname.className = "filename";
+        fname.textContent = item.filename + " [" + (item.type || "n/a") + "]";
+        card.appendChild(fname);
+
+        const sha = document.createElement("div");
+        sha.className = "meta";
+        sha.textContent = "SHA256: " + (item.sha256 || "n/a").slice(0,16) + "...";
+        card.appendChild(sha);
+
+        const url = document.createElement("div");
+        url.className = "meta";
+        url.textContent = "URL: " + (item.url || "n/a");
+        card.appendChild(url);
+
+        grid.appendChild(card);
+      }
+
+      if (filter && !grid.querySelector(".card")) {
+        grid.textContent = "[!] No QR matches for filter: " + filter;
+      }
+    }
+
+    async function init() {
+      const catalog = await loadCatalog();
+      renderCatalog(catalog);
+
+      const search = document.getElementById("search");
+      search.addEventListener("input", () => {
+        renderCatalog(catalog, search.value);
+      });
+    }
+    init();
+  </script>
+</body>
+</html>

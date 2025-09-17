@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Shadow-Scripts Catalog Dashboard</title>
+  <style>
+    :root {
+      --bg: #000;
+      --fg: #00ff99;
+      --accent: #0ff;
+      --warn: #ff4081;
+    }
+    [data-theme="light"] {
+      --bg: #f5f5f5;
+      --fg: #006622;
+      --accent: #0099ff;
+      --warn: #ff0044;
+    }
+    body { background: var(--bg); color: var(--fg); font-family: "Fira Code", monospace; margin:0; padding:20px; }
+    h1 { color: var(--accent); text-shadow:0 0 6px var(--accent); }
+    h2 { color: var(--accent); margin-top:1.5em; }
+    pre.banner { color: var(--accent); font-size:12px; line-height:1.2em; text-shadow:0 0 6px var(--accent); }
+    .progress { font-family: monospace; margin:6px 0; }
+    table { width:100%; border-collapse:collapse; margin-top:0.8em; table-layout: fixed; }
+    th, td { border:1px solid #222; padding:6px; text-align:left; vertical-align:top; word-break: break-word; }
+    th { background:#111; color: var(--accent); }
+    tr:hover { background:#111; }
+    .hash { font-size:11px; color:#ccc; word-break: break-all; }
+    .preview { font-size:12px; color:#7fff7f; white-space:pre; max-height:120px; overflow-y:auto; background:#111; padding:6px; border-radius:4px; border:1px solid #0f0; }
+    .warn { color: var(--warn); font-weight:bold; text-shadow:0 0 6px var(--warn); }
+    footer { font-size:11px; color:#666; margin-top:20px; border-top:1px solid #222; padding-top:10px; }
+    .cursor { display:inline-block; width:8px; background:var(--fg); margin-left:2px; animation: blink 1s step-start infinite; vertical-align:bottom; }
+    @keyframes blink { 0%,50%{opacity:1} 51%,100%{opacity:0} }
+  </style>
+</head>
+<body>
+  <pre class="banner">
+███████╗██╗  ██╗ █████╗ ██████╗  ██████╗ ██╗    ██╗     ██████╗ ███████╗
+██╔════╝██║  ██║██╔══██╗██╔══██╗██╔═══██╗██║    ██║    ██╔═══██╗██╔════╝
+███████╗███████║███████║██████╔╝██║   ██║██║ █╗ ██║    ██║   ██║███████╗
+╚════██║██╔══██║██╔══██║██╔══██╗██║   ██║██║███╗██║    ██║   ██║╚════██║
+███████║██║  ██║██║  ██║██║  ██║╚██████╔╝╚███╔███╔╝    ╚██████╔╝███████║
+╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝  ╚══╝╚══╝      ╚═════╝ ╚══════╝
+  </pre>
+
+  <div style="color:#00ff99; margin-bottom:1em;">
+    Catalog Build: <span id="build-info">--</span>
+  </div>
+
+  <div class="progress" id="progress-bar">[------------------------------] 0/0</div>
+
+  <h2>Asset Catalog</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Filename</th>
+        <th>Size</th>
+        <th>SHA256</th>
+        <th>SHA512</th>
+        <th>Preview</th>
+      </tr>
+    </thead>
+    <tbody id="assets-body"></tbody>
+  </table>
+
+  <h2>Duplicate Assets</h2>
+  <div id="dupes" class="warn"></div>
+
+  <footer>
+    Loader: <a href="index.html" target="_blank">index.html</a> | Manifest: <a href="manifest.json" target="_blank">manifest.json</a> | QR Catalog: <a href="qrcodes/catalog.json" target="_blank">qrcodes/catalog.json</a>
+    <span class="cursor"></span>
+  </footer>
+
+  <script id="manifest-data" type="application/json">
+    __INJECT_MANIFEST__
+  </script>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const manifest = JSON.parse(document.getElementById("manifest-data").textContent);
+      document.getElementById("build-info").textContent = `Build: ${manifest.version_tag} | Files: ${manifest.counts.totalFiles} | Size: ${manifest.counts.totalSize.toLocaleString()} bytes`;
+
+      const table = document.getElementById("assets-body");
+      const dupesContainer = document.getElementById("dupes");
+      const progressBar = document.getElementById("progress-bar");
+      let idx = 0;
+
+      function renderNext() {
+        if(idx >= manifest.assets.length){
+          if(manifest.duplicates?.length){
+            manifest.duplicates.forEach(d => {
+              const div = document.createElement("div");
+              div.className="warn";
+              div.textContent = `Duplicate SHA: ${d.sha} → ${d.files.join(", ")}`;
+              dupesContainer.appendChild(div);
+            });
+          } else {
+            dupesContainer.textContent = "No duplicates detected.";
+          }
+          return;
+        }
+
+        const a = manifest.assets[idx++];
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><a href="${a.url}" target="_blank">${a.filename}</a></td>
+          <td>${a.size.toLocaleString()}</td>
+          <td class="hash">${a.sha256}</td>
+          <td class="hash">${a.sha512}</td>
+          <td><div class="preview">${a.sample?.preview || "n/a"}</div></td>
+        `;
+        table.appendChild(tr);
+        progressBar.textContent = `[${"#".repeat(idx)}${"-".repeat(manifest.assets.length-idx)}] ${idx}/${manifest.assets.length}`;
+        setTimeout(renderNext, 40);
+      }
+      renderNext();
+    });
+  </script>
+</body>
+</html>

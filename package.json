@@ -1,0 +1,122 @@
+{
+  "name": "shadow-scripts",
+  "displayName": "Shadow Scripts - Cyberpunk Security Toolkit",
+  "version": "5.0.0",
+  "private": true,
+  "description": "Cyberpunk-futuristic security research toolkit with obfuscation pipeline, MITM capabilities, proxy configuration generators, and dynamic loader dashboards",
+  "author": {
+    "name": "PopdeuxRem Security Research",
+    "url": "https://github.com/popdeuxrem/shadow-scripts"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/popdeuxrem/shadow-scripts.git"
+  },
+  "homepage": "https://popdeuxrem.github.io/shadow-scripts",
+  "bugs": {
+    "url": "https://github.com/popdeuxrem/shadow-scripts/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "packageManager": "pnpm@9.12.3",
+  "os": ["linux", "darwin", "win32"],
+  "cpu": ["x64", "arm64"],
+  "type": "module",
+  "scripts": {
+    "build": "bash scripts/build-all.sh",
+    "build:clean": "rm -rf apps/loader/public && pnpm build",
+    "build:debug": "DEBUG_MODE=true bash scripts/build-all.sh",
+    "build:production": "BUILD_ENV=production bash scripts/build-all.sh",
+    "dev": "pnpm build:debug",
+    "clean": "rm -rf apps/loader/public dist .build-cache node_modules/.cache",
+    "test": "pnpm validate:all",
+    "validate:gitignore": "node scripts/validate-gitignore.js",
+    "validate:workflows": "node scripts/validate-workflows.js",
+    "validate:configs": "node scripts/validate-configs.js",
+    "validate:all": "pnpm validate:gitignore && pnpm validate:workflows && pnpm validate:configs",
+    "lint": "pnpm validate:all",
+    "lint:fix": "pnpm validate:all",
+    "obfuscate": "node scripts/obfuscate-all.js",
+    "obfuscate:light": "OBFUSCATION_PROFILE=light node scripts/obfuscate-all.js",
+    "obfuscate:medium": "OBFUSCATION_PROFILE=medium node scripts/obfuscate-all.js",
+    "obfuscate:heavy": "OBFUSCATION_PROFILE=heavy node scripts/obfuscate-all.js",
+    "obfuscate:stealth": "OBFUSCATION_PROFILE=stealth node scripts/obfuscate-all.js",
+    "generate:manifest": "node scripts/gen-manifest.js",
+    "generate:dashboard": "node scripts/gen-dashboard.js",
+    "generate:shadowrocket": "node scripts/gen-shadowrocket.js",
+    "generate:loon": "node scripts/gen-loon.js",
+    "generate:stash": "node scripts/gen-stash.js",
+    "generate:mobileconfig": "node scripts/gen-mobileconfig.js",
+    "generate:tunna": "node scripts/gen-tunna.js",
+    "generate:catalog": "node scripts/gen-catalog.js",
+    "generate:qrcodes": "node scripts/gen-qrcodes.js",
+    "generate:all": "pnpm generate:shadowrocket && pnpm generate:loon && pnpm generate:stash && pnpm generate:mobileconfig && pnpm generate:tunna && pnpm generate:manifest && pnpm generate:dashboard && pnpm generate:catalog && pnpm generate:qrcodes",
+    "serve": "cd apps/loader/public && python3 -m http.server 8080",
+    "serve:dev": "cd apps/loader/public && python3 -m http.server 3000",
+    "security:scan": "pnpm audit --audit-level moderate",
+    "security:fix": "pnpm audit fix",
+    "deps:update": "pnpm update",
+    "deps:outdated": "pnpm outdated",
+    "info": "node -e \"console.log('Shadow Scripts v' + require('./package.json').version); console.log('Node:', process.version); console.log('Platform:', process.platform);\"",
+    "postinstall": "echo '🔧 Shadow Scripts v5.0.0 installed!'",
+    "precommit": "pnpm validate:all",
+    "prepush": "pnpm build && pnpm validate:all"
+  },
+  "dependencies": {
+    "javascript-obfuscator": "^4.1.1",
+    "js-yaml": "^4.1.0",
+    "plist": "^3.1.0",
+    "uuid": "^11.1.0",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "chalk": "^5.3.0",
+    "typescript": "^5.2.2"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.33.0"
+  },
+  "config": {
+    "obfuscation": {
+      "defaultProfile": "medium",
+      "outputEncoding": "base64"
+    },
+    "build": {
+      "outputDir": "apps/loader/public",
+      "sourceDir": "src-scripts",
+      "configsDir": "configs"
+    },
+    "deployment": {
+      "baseUrl": "https://popdeuxrem.github.io/shadow-scripts"
+    }
+  },
+  "directories": {
+    "lib": "scripts",
+    "test": "tests",
+    "doc": "docs"
+  },
+  "files": [
+    "scripts/",
+    "src-scripts/",
+    "configs/",
+    "apps/loader/public/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "main": "scripts/build-all.sh",
+  "bin": {
+    "shadow-scripts": "./scripts/build-all.sh",
+    "shadow-obfuscate": "./scripts/obfuscate-all.js",
+    "shadow-validate": "./scripts/validate-configs.js"
+  },
+  "volta": {
+    "node": "22.17.1",
+    "pnpm": "9.12.3"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com/"
+  }
+}

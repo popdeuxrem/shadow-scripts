@@ -1,0 +1,29 @@
+{
+  "generated": "2025-09-02T01:17:40.990Z",
+  "payloadCount": 66,
+  "baseUrl": "https://popdeuxrem.github.io/shadow-scripts/obfuscated",
+  "features": {
+    "hostname_mapping": true,
+    "integrity_verification": true,
+    "debug_mode": true,
+    "research_mode": true
+  },
+  "hostnames": [
+    "amazon.com",
+    "anthropic.com",
+    "chatgpt.com",
+    "claude.ai",
+    "coinbase.com",
+    "instagram.com",
+    "js.stripe.com",
+    "moonpay.com",
+    "openai.com",
+    "paypal.com",
+    "paypalobjects.com",
+    "stripe.com",
+    "textnow.com",
+    "textnowapi.com",
+    "tiktok.com",
+    "wise.com"
+  ]
+}
