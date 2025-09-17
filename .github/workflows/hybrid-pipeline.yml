@@ -1,0 +1,167 @@
+name: ⚡ Cyberpunk Hybrid Build & Deploy Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cyberpunk-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 20.x
+  PNPM_VERSION: 9.12.3
+  CACHE_KEY: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+  BASE_URL: https://popdeuxrem.github.io/shadow-scripts
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  setup:
+    name: ⚙️ Setup Environment
+    runs-on: ubuntu-latest
+    outputs:
+      cache-key: ${{ env.CACHE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
+
+      - name: Restore pnpm Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pnpm-store
+            .pnpm-store
+          key: ${{ env.CACHE_KEY }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+  build:
+    name: 🔧 Build, Obfuscate & Generate
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore pnpm Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pnpm-store
+            .pnpm-store
+          key: ${{ env.CACHE_KEY }}
+
+      - name: 🟣 Cyberpunk Build
+        run: |
+          echo -e "\033[95m[CYBERPUNK] Starting build pipeline...\033[0m"
+          chmod +x ./scripts/*.sh || true
+          ./scripts/build-all.sh
+          echo -e "\033[95m[CYBERPUNK] Build pipeline complete.\033[0m"
+
+      - name: Generate QR Codes & Loader Preview
+        run: |
+          node scripts/gen-qrcodes.js --inline --ci || echo "⚠️ QR generation skipped"
+          node scripts/gen-index-loader.js || echo "⚠️ Index loader skipped"
+
+      - name: Validate Artifacts & SHA
+        run: |
+          echo -e "\033[96m[VALIDATE] Checking artifacts...\033[0m"
+          ARTIFACTS=$(find apps/loader/public -type f)
+          for f in $ARTIFACTS; do
+            SHA=$(sha256sum "$f" | cut -d ' ' -f1)
+            SIZE=$(stat -c%s "$f")
+            echo -e "\033[96m[SHA] $f → $SHA | $SIZE bytes\033[0m"
+          done
+          echo -e "\033[96m[VALIDATE] All artifacts checked.\033[0m"
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/loader/public
+
+  test:
+    name: 🧪 Lint & Run Tests
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          corepack enable
+          corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm test
+
+  deploy:
+    name: 🚀 Deploy to GitHub Pages
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
+      - name: Deploy Pages
+        uses: actions/deploy-pages@v4
+
+      - name: Neon Dashboard Preview
+        run: echo -e "\033[95m[NEON] Preview your loader dashboard at ${{ env.BASE_URL }}\033[0m"
+
+  notify:
+    name: 📣 Discord Notifications
+    needs: [deploy]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Prepare Payload
+        id: payload
+        run: |
+          cat <<EOF > payload.json
+          {
+            "text": "⚡ Cyberpunk Hybrid Build & Deploy finished",
+            "repo": "${{ github.repository }}",
+            "commit": "${{ github.sha }}",
+            "ref": "${{ github.ref }}",
+            "workflow": "${{ github.workflow }}",
+            "status": "${{ job.status || 'unknown' }}"
+          }
+          EOF
+      - name: Send Discord Alert
+        if: ${{ secrets.DISCORD_WEBHOOK != '' }}
+        run: |
+          WEBHOOK="${{ secrets.DISCORD_WEBHOOK }}"
+          curl -s -H "Content-Type: application/json" -d @payload.json "$WEBHOOK" || echo "⚠️ Discord notify failed"
+      - name: Fallback log
+        if: ${{ secrets.DISCORD_WEBHOOK == '' }}
+        run: echo "⚠️ No DISCORD_WEBHOOK secret configured"
+
+  cleanup:
+    name: 🧹 Prune pnpm Cache
+    needs: notify
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Prune Cache
+        run: pnpm store prune || true
