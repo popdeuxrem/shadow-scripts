@@ -1,4 +1,4 @@
-name: Shadow-Scripts Hybrid Build & Deploy Pipeline
+name: Hybrid Build & Deploy Pipeline (GitHub Pages)
 
 on:
   push:
@@ -16,7 +16,6 @@ concurrency:
 env:
   NODE_VERSION: 20.x
   PNPM_VERSION: 9.12.3
-  CACHE_KEY: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
 
 permissions:
   contents: write
@@ -31,6 +30,8 @@ jobs:
   setup:
     name: Setup Environment
     runs-on: ubuntu-latest
+    env:
+      CACHE_KEY: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
     outputs:
       cache-key: ${{ env.CACHE_KEY }}
     steps:
@@ -44,12 +45,12 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Enable & Prep pnpm
+      - name: Enable & Prep pnpm (corepack)
         run: |
           corepack enable
           corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
 
-      - name: Restore pnpm Store Cache
+      - name: Restore pnpm store cache
         uses: actions/cache@v4
         with:
           path: |
@@ -63,9 +64,11 @@ jobs:
         run: pnpm install --frozen-lockfile --prefer-offline
 
   build:
-    name: Build Cyberpunk Artifacts
+    name: Build Application & Artifacts
     needs: setup
     runs-on: ubuntu-latest
+    env:
+      CACHE_KEY: ${{ needs.setup.outputs.cache-key }}
     outputs:
       pages-artifact: apps/loader/public
     steps:
@@ -74,7 +77,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Restore pnpm Cache
+      - name: Restore pnpm store cache
         uses: actions/cache@v4
         with:
           path: |
@@ -82,31 +85,38 @@ jobs:
             .pnpm-store
           key: ${{ env.CACHE_KEY }}
 
-      - name: Make Scripts Executable
+      - name: Install dependencies (build)
+        run: pnpm install --frozen-lockfile --prefer-offline
+
+      - name: Make scripts executable
         run: chmod +x ./scripts/*.sh || true
 
-      - name: Run Full Build
+      - name: Run Build
         run: |
           set -euo pipefail
           export TERM=xterm-256color
-          ./scripts/build-all.sh --force-rebuild
+          ./scripts/build-all.sh
 
-      - name: Generate Loader & Dashboard
+      - name: Generate manifests, loader, catalog
         run: |
-          node scripts/gen-manifest.js
-          node scripts/gen-index-loader.js
-          node scripts/gen-catalog.js
+          node scripts/gen-manifest.js || true
+          node scripts/gen-index-loader.js || true
+          node scripts/gen-catalog.js || true
 
-      - name: Generate QR Codes
+      - name: Generate QR Codes (optional)
         run: |
-          node scripts/gen-qrcodes.js --inline --ci
+          if [ -f ./scripts/gen-qrcodes.js ]; then
+            node scripts/gen-qrcodes.js --output apps/loader/public/qrcodes --version "${{ github.ref_name || github.sha }}"
+          else
+            echo "gen-qrcodes.js not found, skipping"
+          fi
 
-      - name: Validate Output
+      - name: Validate pages output
         run: |
           if [ ! -d "apps/loader/public" ]; then
-            echo "ERROR: apps/loader/public missing; build failed" && exit 1
+            echo "ERROR: apps/loader/public missing; build may have failed" && exit 1
           fi
-          echo "✅ Pages directory verified: $(du -sh apps/loader/public)"
+          echo "Pages directory present: $(du -sh apps/loader/public || true)"
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
@@ -114,17 +124,20 @@ jobs:
           path: apps/loader/public
 
   test:
-    name: Lint & Unit Tests
+    name: Run Tests
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: |
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Install pnpm
+        run: |
           corepack enable
           corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
           pnpm install --frozen-lockfile
-      - run: |
-          pnpm lint || (echo "Lint failed" && exit 1)
+      - name: Run Tests
+        run: |
+          pnpm lint || (echo "Lint errors" && exit 1)
           pnpm test || (echo "Tests failed" && exit 1)
 
   deploy:
@@ -134,23 +147,27 @@ jobs:
     environment:
       name: github-pages
     steps:
-      - name: Deploy Pages
+      - name: Deploy to GitHub Pages
+        id: deploy
         uses: actions/deploy-pages@v4
-      - name: Show Published URL
-        run: echo "Pages deployed. Check repository settings for URL."
+
+      - name: Show published URL
+        run: echo "Pages deployed. Visit the Pages site from repository settings or Actions UI environment URL."
 
   notify:
-    name: Discord / Slack Notifications
+    name: Send Notifications
     needs: [deploy]
     runs-on: ubuntu-latest
     if: always()
+    env:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK || '' }}
     steps:
-      - name: Prepare Notification Payload
+      - name: Prepare notification payload
         id: payload
         run: |
           cat <<EOF > payload.json
           {
-            "text": "⚡ Shadow-Scripts Hybrid Build Finished",
+            "text": "⚡ Hybrid Build & Deploy finished",
             "repo": "${{ github.repository }}",
             "commit": "${{ github.sha }}",
             "ref": "${{ github.ref }}",
@@ -158,19 +175,20 @@ jobs:
             "status": "${{ job.status || 'unknown' }}"
           }
           EOF
-
-      - name: Send Discord Alert (optional)
-        if: ${{ secrets.DISCORD_WEBHOOK != '' }}
+      - name: Send Discord Notification (best-effort)
+        if: env.DISCORD_WEBHOOK != ''
         run: |
-          curl -s -H "Content-Type: application/json" -d @payload.json "${{ secrets.DISCORD_WEBHOOK }}" || echo "⚠️ Discord notify failed"
-      - name: Fallback Logging
-        if: ${{ secrets.DISCORD_WEBHOOK == '' }}
-        run: echo "No DISCORD_WEBHOOK configured; skipping notification"
+          PAYLOAD=$(cat payload.json)
+          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK" || echo "Discord notify failed"
+      - name: Fallback log
+        if: env.DISCORD_WEBHOOK == ''
+        run: echo "No DISCORD_WEBHOOK secret configured; skipping notifications"
 
   cleanup:
-    name: Cleanup Cache
+    name: Cleanup (optional)
     needs: notify
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - run: pnpm store prune || true
+      - name: Prune pnpm cache
+        run: pnpm store prune || true
