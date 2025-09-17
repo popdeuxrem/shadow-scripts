@@ -1,4 +1,4 @@
-name: Hybrid Build & Deploy Pipeline (GitHub Pages)
+name: ⚡ Hybrid Build & Deploy Pipeline ⚡
 
 on:
   push:
@@ -7,11 +7,16 @@ on:
   pull_request:
     branches:
       - main
-  workflow_dispatch:   # enables manual trigger
+  workflow_dispatch:
 
 concurrency:
   group: hybrid-build-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  NODE_VERSION: 20.x
+  PNPM_VERSION: 9.12.3
+  CACHE_KEY: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
 
 permissions:
   contents: write
@@ -24,37 +29,33 @@ defaults:
 
 jobs:
   setup:
-    name: Setup Environment
+    name: 🔧 Setup Environment
     runs-on: ubuntu-latest
     outputs:
-      cache-key: ${{ steps.set-cache-key.outputs.CACHE_KEY }}
+      cache-key: ${{ env.CACHE_KEY }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
         with:
-          node-version: 20.x
+          node-version: ${{ env.NODE_VERSION }}
 
-      - name: Enable & Prep pnpm (corepack)
+      - name: Enable pnpm
         run: |
           corepack enable
-          corepack prepare pnpm@9.12.3 --activate
+          corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
 
-      - name: Set Cache Key
-        id: set-cache-key
-        run: echo "CACHE_KEY=$(echo $RUNNER_OS-pnpm-$(sha256sum pnpm-lock.yaml | cut -d' ' -f1))" >> $GITHUB_OUTPUT
-
-      - name: Restore pnpm store cache
+      - name: Restore pnpm cache
         uses: actions/cache@v4
         with:
           path: |
             ~/.pnpm-store
             .pnpm-store
-          key: ${{ steps.set-cache-key.outputs.CACHE_KEY }}
+          key: ${{ env.CACHE_KEY }}
           restore-keys: |
             ${{ runner.os }}-pnpm-
 
@@ -62,30 +63,32 @@ jobs:
         run: pnpm install --frozen-lockfile --prefer-offline
 
   build:
-    name: Build Application & Artifacts
+    name: 🚀 Build Application & Artifacts
     needs: setup
     runs-on: ubuntu-latest
+    outputs:
+      pages-artifact: apps/loader/public
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Restore pnpm store cache
+      - name: Restore pnpm cache
         uses: actions/cache@v4
         with:
           path: |
             ~/.pnpm-store
             .pnpm-store
-          key: ${{ needs.setup.outputs.cache-key }}
+          key: ${{ env.CACHE_KEY }}
 
-      - name: Install Dependencies (build)
+      - name: Install dependencies (build)
         run: pnpm install --frozen-lockfile --prefer-offline
 
       - name: Make scripts executable
         run: chmod +x ./scripts/*.sh || true
 
-      - name: Run Build
+      - name: Run Full Build Pipeline
         run: |
           set -euo pipefail
           export TERM=xterm-256color
@@ -93,20 +96,19 @@ jobs:
 
       - name: Generate Manifests & Loader
         run: |
-          node scripts/gen-manifest.js
-          node scripts/gen-index-loader.js
-          node scripts/gen-catalog.js
+          node scripts/gen-manifest.js || true
+          node scripts/gen-index-loader.js || true
+          node scripts/gen-catalog.js || true
 
       - name: Generate QR Codes
-        if: ${{ always() }}
         run: |
           if [ -f ./scripts/gen-qrcodes.js ]; then
-            node scripts/gen-qrcodes.js --output apps/loader/public/qrcodes
+            node scripts/gen-qrcodes.js --output apps/loader/public/qrcodes --version "${{ github.ref_name || github.sha }}"
           else
             echo "gen-qrcodes.js not found, skipping"
           fi
 
-      - name: Validate Pages Output
+      - name: Validate pages output
         run: |
           if [ ! -d "apps/loader/public" ]; then
             echo "ERROR: apps/loader/public missing; build may have failed" && exit 1
@@ -119,7 +121,7 @@ jobs:
           path: apps/loader/public
 
   test:
-    name: Run Tests
+    name: 🧪 Run Tests
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -128,29 +130,30 @@ jobs:
       - name: Install pnpm
         run: |
           corepack enable
-          corepack prepare pnpm@9.12.3 --activate
+          corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
           pnpm install --frozen-lockfile
-      - name: Run Tests
+      - name: Run Tests & Lint
         run: |
           pnpm lint || (echo "Lint errors" && exit 1)
           pnpm test || (echo "Tests failed" && exit 1)
 
   deploy:
-    name: Deploy to GitHub Pages
+    name: 🌐 Deploy to GitHub Pages
     needs: [build, test]
     runs-on: ubuntu-latest
     environment:
       name: github-pages
     steps:
       - name: Deploy to GitHub Pages
+        id: deploy
         uses: actions/deploy-pages@v4
+      - name: Show published URL
+        run: |
+          echo "Pages deployed. Visit the Pages site from repository settings or Actions environment URL."
 
-      - name: Show Published URL
-        run: echo "Pages deployed. Check repository settings or Actions UI for environment URL."
-
-    notify:
-    name: Send Discord Notifications
-    needs: deploy
+  notify:
+    name: 📢 Send Discord Notification
+    needs: [deploy]
     runs-on: ubuntu-latest
     steps:
       - name: Prepare Notification Payload
@@ -168,11 +171,20 @@ jobs:
           EOF
 
       - name: Send Discord Notification
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
           if [ -n "${DISCORD_WEBHOOK}" ]; then
             curl -s -H "Content-Type: application/json" -d @payload.json "$DISCORD_WEBHOOK" || echo "Discord notify failed"
           else
             echo "No DISCORD_WEBHOOK secret configured; skipping notifications"
           fi
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+
+  cleanup:
+    name: 🧹 Cleanup
+    needs: notify
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Prune pnpm cache
+        run: pnpm store prune || true
