@@ -148,11 +148,10 @@ jobs:
       - name: Show Published URL
         run: echo "Pages deployed. Check repository settings or Actions UI for environment URL."
 
-  notify:
+    notify:
     name: Send Discord Notifications
     needs: deploy
     runs-on: ubuntu-latest
-    if: always()
     steps:
       - name: Prepare Notification Payload
         id: payload
@@ -169,19 +168,11 @@ jobs:
           EOF
 
       - name: Send Discord Notification
-        if: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          curl -s -H "Content-Type: application/json" -d @payload.json ${{ secrets.DISCORD_WEBHOOK }} || echo "Discord notify failed"
-
-      - name: Fallback Log
-        if: ${{ !secrets.DISCORD_WEBHOOK }}
-        run: echo "No DISCORD_WEBHOOK secret configured; skipping notifications"
-
-  cleanup:
-    name: Cleanup
-    needs: notify
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-      - name: Prune pnpm cache
-        run: pnpm store prune || true
+          if [ -n "${DISCORD_WEBHOOK}" ]; then
+            curl -s -H "Content-Type: application/json" -d @payload.json "$DISCORD_WEBHOOK" || echo "Discord notify failed"
+          else
+            echo "No DISCORD_WEBHOOK secret configured; skipping notifications"
+          fi
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
