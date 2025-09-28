@@ -69,26 +69,22 @@ jobs:
       contents: read
       pages: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Run gen-all.js
+      - name: Run gen-all.js v4.1
         run: |
           corepack enable
           corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
-          node scripts/gen-all.js --outdir=apps/loader/public/configs
+          node --experimental-specifier-resolution=node scripts/gen-all.js --outdir=apps/loader/public/configs
 
-      - name: Archive Pipeline Report
-        id: upload-report
+      - name: Upload Pipeline Report
         uses: actions/upload-artifact@v4
         with:
-          name: pipeline-report-${{ github.sha }}
+          name: pipeline-report
           path: apps/loader/public/configs/pipeline-report.json
-          retention-days: 30
-
-      - name: Verify Artifact Upload
-        run: |
-          echo "Uploaded pipeline-report.json as artifact 'pipeline-report-${{ github.sha }}'"
-          ls -lh apps/loader/public/configs/pipeline-report.json
 
       - name: Validate Public Configs
         run: |
@@ -105,7 +101,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
       - name: Install Dependencies
         run: |
