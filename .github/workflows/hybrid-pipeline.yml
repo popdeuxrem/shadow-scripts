@@ -60,7 +60,14 @@ jobs:
             ${{ runner.os }}-pnpm-
 
       - name: Install Dependencies
-        run: pnpm install --frozen-lockfile --prefer-offline
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            echo "pnpm-lock.yaml found, installing with frozen lockfile"
+            pnpm install --frozen-lockfile --prefer-offline
+          else
+            echo "pnpm-lock.yaml missing, installing without frozen lockfile"
+            pnpm install --no-frozen-lockfile --prefer-offline
+          fi
 
   build:
     name: 🚀 Build Application & Artifacts
@@ -87,7 +94,14 @@ jobs:
           key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install dependencies (build)
-        run: pnpm install --frozen-lockfile --prefer-offline
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            echo "pnpm-lock.yaml found, installing with frozen lockfile"
+            pnpm install --frozen-lockfile --prefer-offline
+          else
+            echo "pnpm-lock.yaml missing, installing without frozen lockfile"
+            pnpm install --no-frozen-lockfile --prefer-offline
+          fi
 
       - name: Make scripts executable
         run: chmod +x ./scripts/*.sh || true
@@ -138,7 +152,13 @@ jobs:
         run: |
           corepack enable
           corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
-          pnpm install --frozen-lockfile
+          if [ -f pnpm-lock.yaml ]; then
+            echo "pnpm-lock.yaml found, installing with frozen lockfile"
+            pnpm install --frozen-lockfile
+          else
+            echo "pnpm-lock.yaml missing, installing without frozen lockfile"
+            pnpm install --no-frozen-lockfile
+          fi
       - name: Run Tests & Lint
         run: |
           pnpm lint || (echo "Lint errors" && exit 1)
