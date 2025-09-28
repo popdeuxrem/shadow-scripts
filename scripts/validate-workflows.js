@@ -4,10 +4,12 @@
  * Validates GitHub Actions workflow configurations for consistency and best practices
  */
 
-const fs = require('fs');
-const path = require('path');
-const yaml = require('js-yaml');
+import fs from 'fs';
+import path from 'path';
+import yaml from 'js-yaml';
+import { fileURLToPath } from 'url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WORKFLOWS_DIR = path.join(__dirname, '..', '.github', 'workflows');
 
 function validateWorkflow(filePath, workflowName) {
@@ -40,11 +42,12 @@ function validateWorkflow(filePath, workflowName) {
       }
     }
     
-    // Check for pnpm usage (should be npm)
+    // Check package manager consistency
     const workflowStr = content.toLowerCase();
-    if (workflowStr.includes('pnpm')) {
-      issues.push('Workflow still references pnpm, should use npm');
-    }
+    // This project uses pnpm, so no need to flag it
+    // if (workflowStr.includes('pnpm')) {
+    //   issues.push('Workflow still references pnpm, should use npm');
+    // }
     
     // Check for proper permissions
     let hasProperPermissions = false;
@@ -165,8 +168,8 @@ function main() {
   }
 }
 
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
 
-module.exports = { validateWorkflow };
+export { validateWorkflow };

@@ -15,19 +15,28 @@
  *   2 = errors (pipeline should fail)
  */
 
-const fs = require("fs");
-const path = require("path");
-const yaml = require("js-yaml");
-const chalk = require("chalk");
-const crypto = require("crypto");
+import fs from "fs";
+import path from "path";
+import yaml from "js-yaml";
+import crypto from "crypto";
+import { fileURLToPath } from 'url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const MASTER_RULES = path.join(ROOT, "configs/master-rules.yaml");
 
-const log = (msg) => console.log(chalk.cyanBright("[⚡ VALIDATOR]"), msg);
-const warn = (msg) => console.warn(chalk.yellow("[⚠️ WARNING]"), msg);
-const err = (msg) => console.error(chalk.red("[❌ ERROR]"), msg);
-const ok = (msg) => console.log(chalk.green("[✔ OK]"), msg);
+// Simple console colors without chalk dependency
+const colors = {
+  cyan: (text) => `\x1b[36m${text}\x1b[0m`,
+  yellow: (text) => `\x1b[33m${text}\x1b[0m`,
+  red: (text) => `\x1b[31m${text}\x1b[0m`,
+  green: (text) => `\x1b[32m${text}\x1b[0m`
+};
+
+const log = (msg) => console.log(colors.cyan("[⚡ VALIDATOR]"), msg);
+const warn = (msg) => console.warn(colors.yellow("[⚠️ WARNING]"), msg);
+const err = (msg) => console.error(colors.red("[❌ ERROR]"), msg);
+const ok = (msg) => console.log(colors.green("[✔ OK]"), msg);
 
 function sha256(content) {
   return crypto.createHash("sha256").update(content).digest("hex");

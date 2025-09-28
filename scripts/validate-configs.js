@@ -6,11 +6,13 @@
  * - Reads pipeline-report.json for additional diagnostics
  */
 
-const fs = require('fs');
-const path = require('path');
-const yaml = require('js-yaml');
-const plist = require('plist');
+import fs from 'fs';
+import path from 'path';
+import yaml from 'js-yaml';
+import plist from 'plist';
+import { fileURLToPath } from 'url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const CONF_DIR = path.join(ROOT, 'apps/loader/public/configs');
 const OBF_DIR = path.join(ROOT, 'apps/loader/public/obfuscated');
@@ -85,8 +87,11 @@ function readManifestPayloads() {
     payloads = manifest.payloads.map(p => (typeof p === 'string' ? p : (p.path || p)));
   } else if (manifest.files && Array.isArray(manifest.files)) {
     payloads = manifest.files;
+  } else if (manifest.assets && Array.isArray(manifest.assets)) {
+    // new format: assets array with filename property
+    payloads = manifest.assets.map(a => a.filename || a.path || a);
   } else {
-    die('manifest.json missing payloads array (expected top-level array or { payloads: [...] } )');
+    die('manifest.json missing payloads/files/assets array (expected top-level array or { payloads/files/assets: [...] } )');
   }
 
   // filter/normalize strings only
