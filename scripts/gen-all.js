@@ -1,141 +1,154 @@
 #!/usr/bin/env node
 /**
- * gen-all.js v4.0.0 — Enhanced Hybrid Generator
- *
- * - Parallel execution with fallback
- * - CI/CD optimized with pipeline report
- * - Optional dry-run, retries, and quiet mode
- * - Metadata and logging
+ * gen-all.js v4.0.0
+ * ─────────────────────────────────────────────
+ * Unified All-in-One Config Generator
+ * Handles:
+ *   - Shadowrocket / Loon / Stash / Tunna / Egern / Mobileconfig
+ *   - Obfuscation
+ *   - Dashboard & index loader
+ *   - Catalog
+ *   - QR codes
+ *   - Pipeline JSON report
+ *   - CI/CD friendly
  */
 
-const path = require("path");
-const fs = require("fs");
-const { execSync, exec } = require("child_process");
-const os = require("os");
+import fs from "fs";
+import path from "path";
+import { execSync } from "child_process";
 
 ////////////////////////////////////////////////////////////////////////////////
 // Helpers
 ////////////////////////////////////////////////////////////////////////////////
-const colors = {
-  reset: "\x1b[0m",
-  cyan: "\x1b[36m",
-  green: "\x1b[32m",
-  red: "\x1b[31m",
-  yellow: "\x1b[33m",
-};
-
-function log(msg, level = "info") {
-  const color = { info: colors.cyan, warn: colors.yellow, error: colors.red, success: colors.green }[level] || colors.cyan;
-  console.log(`${color}${msg}${colors.reset}`);
-}
+function logInfo(msg)    { console.log(`\x1b[36m[INFO]\x1b[0m ${msg}`); }
+function logSuccess(msg) { console.log(`\x1b[32m[SUCCESS]\x1b[0m ${msg}`); }
+function logWarn(msg)    { console.log(`\x1b[33m[WARN]\x1b[0m ${msg}`); }
+function logError(msg)   { console.error(`\x1b[31m[ERROR]\x1b[0m ${msg}`); }
 
 function gitCommit() {
   try { return execSync("git rev-parse --short HEAD").toString().trim(); }
   catch { return "unknown"; }
 }
 
-function getBranch() {
-  try { return execSync("git rev-parse --abbrev-ref HEAD").toString().trim(); }
-  catch { return "unknown"; }
+function stepBanner(step, total, title) {
+  console.log(`\n\x1b[35m=== [${step}/${total}] ${title} ===\x1b[0m`);
 }
 
-function runCommand(cmd, dryRun = false, retries = 1) {
-  if (dryRun) {
-    log(`[DRY-RUN] ${cmd}`, "info");
-    return { ok: true, output: "" };
-  }
-  let attempt = 0;
-  while (attempt <= retries) {
-    try {
-      const output = execSync(cmd, { stdio: "pipe", encoding: "utf8" });
-      return { ok: true, output: output.trim() };
-    } catch (e) {
-      attempt++;
-      if (attempt > retries) return { ok: false, error: e.message };
-      log(`Retrying (${attempt}/${retries}) → ${cmd}`, "warn");
-    }
+function runCommand(cmd, args = []) {
+  try {
+    return execSync([cmd, ...args].join(" "), { encoding: "utf-8" });
+  } catch (err) {
+    logWarn(`Command failed: ${cmd} ${args.join(" ")} → ${err.message}`);
+    return null;
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Generator orchestrator
+// Paths & Environment
 ////////////////////////////////////////////////////////////////////////////////
-const generators = [
-  { name: "Shadowrocket", script: "gen-shadowrocket.js", critical: true },
-  { name: "Loon", script: "gen-loon.js", critical: true },
-  { name: "Stash", script: "gen-stash.js", critical: true },
-  { name: "Egern", script: "gen-egern.js", critical: false },
-  { name: "Tunna", script: "gen-tunna.js", critical: true },
-];
+const ROOT_DIR = path.resolve(".");
+const OUT_DIR = (() => {
+  const arg = process.argv.find(a => a.startsWith("--outdir="));
+  return arg ? arg.split("=")[1] : path.join(ROOT_DIR, "apps/loader/public/configs");
+})();
+const QR_DIR = path.join(ROOT_DIR, "apps/loader/public/qrcodes");
+const BUILD_CACHE = path.join(ROOT_DIR, ".build-cache");
+const GIT_HASH = gitCommit();
+const VERSION = process.env.VERSION || "0.0.0";
 
-function runGenerator(name, scriptFile, args = [], outdir, dryRun = false) {
-  const scriptPath = path.resolve(__dirname, scriptFile);
-  if (!fs.existsSync(scriptPath)) {
-    const msg = `⚠️ ${name} generator not found → skipping`;
-    log(msg, "warn");
-    return { name, ok: false, error: "Script missing" };
+////////////////////////////////////////////////////////////////////////////////
+// Utilities
+////////////////////////////////////////////////////////////////////////////////
+function ensureDir(dir) { fs.mkdirSync(dir, { recursive: true }); }
+function fileExists(file) { return fs.existsSync(file); }
+function runNode(script, args = []) {
+  const scriptPath = path.resolve(ROOT_DIR, "scripts", script);
+  if (!fileExists(scriptPath)) {
+    logWarn(`Script missing: ${script}`);
+    return null;
   }
-  const cmd = `node ${scriptPath} ${args.join(" ")} --outdir=${outdir}`;
-  return runCommand(cmd, dryRun, 1);
+  try {
+    const result = execSync(`node ${scriptPath} ${args.join(" ")}`, { encoding: "utf-8" });
+    logSuccess(`✅ ${script} → OK`);
+    return result.trim();
+  } catch (err) {
+    logWarn(`❌ ${script} failed: ${err.message}`);
+    return null;
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Main
+// Main Pipeline
 ////////////////////////////////////////////////////////////////////////////////
-function main() {
-  console.log(colors.cyan + "\n⚡ Shadow-Scripts :: GEN-ALL v4.0.0 ⚡\n" + colors.reset);
+async function main() {
   const startTime = Date.now();
-  const argv = process.argv.slice(2);
+  let step = 1;
+  const totalSteps = 7;
 
-  const outdirArg = argv.find(a => a.startsWith("--outdir="));
-  const outdir = outdirArg ? outdirArg.split("=")[1] : path.join(__dirname, "../apps/loader/public/configs");
-  const dryRun = argv.includes("--dry-run");
-  const quiet = argv.includes("--quiet");
+  stepBanner(step++, totalSteps, "Obfuscating payloads");
+  ensureDir(path.join(ROOT_DIR, "apps/loader/public/obfuscated"));
+  runNode("obfuscate-all.js", ["--profile=medium"]);
 
-  const forwardArgs = argv.filter(a => !a.startsWith("--outdir") && a !== "--dry-run" && a !== "--quiet");
-
-  fs.mkdirSync(outdir, { recursive: true });
-
-  const results = [];
-
-  // Parallel execution of generators
-  const promises = generators.map(g => {
-    return new Promise(resolve => {
-      const res = runGenerator(g.name, g.script, forwardArgs, outdir, dryRun);
-      results.push({ ...res, critical: g.critical });
-      resolve();
-    });
+  stepBanner(step++, totalSteps, "Generating all configs");
+  ensureDir(OUT_DIR);
+  const generators = [
+    "gen-shadowrocket.js",
+    "gen-loon.js",
+    "gen-stash.js",
+    "gen-mobileconfig.js",
+    "gen-tunna.js",
+    "gen-egern.js",
+  ];
+  const results = generators.map(gen => {
+    const outFile = path.join(OUT_DIR, path.basename(gen).replace("gen-", "").replace(".js", ".conf"));
+    runNode(gen, ["--outdir=" + OUT_DIR]);
+    return { generator: gen, output: outFile };
   });
 
-  Promise.all(promises).then(() => {
-    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-    const commit = gitCommit();
-    const branch = getBranch();
+  stepBanner(step++, totalSteps, "Generating manifest & loader");
+  runNode("gen-manifest.js", ["--ci"]);
+  runNode("gen-dashboard.js", ["--ci"]);
+  runNode("gen-index-loader.js", ["--ci"]);
+  runNode("gen-catalog.js", ["--ci"]);
 
-    const report = {
-      generator: "gen-all.js",
-      timestamp: new Date().toISOString(),
-      commit,
-      branch,
-      duration: `${duration}s`,
-      os: os.platform(),
-      results,
-    };
+  stepBanner(step++, totalSteps, "Generating QR codes");
+  ensureDir(QR_DIR);
+  runNode("gen-qrcodes.js", ["--output", QR_DIR, "--version", GIT_HASH]);
 
-    const reportPath = path.join(outdir, "pipeline-report.json");
-    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
-    log(`📊 Pipeline report saved → ${reportPath}`, "success");
+  stepBanner(step++, totalSteps, "Validating configs & gitignore");
+  runNode("validate-gitignore.js");
+  runNode("validate-configs.js");
 
-    const criticalFailed = results.filter(r => r.critical && !r.ok);
-    if (criticalFailed.length) {
-      log(`❌ Critical generators failed: ${criticalFailed.map(f => f.name).join(", ")}`, "error");
-      process.exit(1);
-    }
+  stepBanner(step++, totalSteps, "Writing pipeline report");
+  ensureDir(OUT_DIR);
+  const report = {
+    timestamp: new Date().toISOString(),
+    commit: GIT_HASH,
+    version: VERSION,
+    duration_s: ((Date.now() - startTime)/1000).toFixed(2),
+    results
+  };
+  fs.writeFileSync(path.join(OUT_DIR, "pipeline-report.json"), JSON.stringify(report, null, 2));
+  logSuccess(`Pipeline report written: ${OUT_DIR}/pipeline-report.json`);
 
-    log(`✨ All generators completed in ${duration}s (commit: ${commit}, branch: ${branch})`, "success");
+  stepBanner(step++, totalSteps, "Build summary");
+  console.log("──────────────────────────────");
+  console.log(`📦 Obfuscated payloads: ${fs.readdirSync(path.join(ROOT_DIR, "apps/loader/public/obfuscated")).length}`);
+  console.log(`⚙️ Configs generated: ${OUT_DIR}`);
+  console.log(`🔗 QR codes: ${QR_DIR}/*`);
+  console.log("──────────────────────────────");
+
+  logSuccess(`Total pipeline duration: ${((Date.now() - startTime)/1000).toFixed(2)}s`);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Execute
+////////////////////////////////////////////////////////////////////////////////
+if (require.main === module) {
+  main().catch(err => {
+    logError(`Pipeline failed: ${err.message}`);
+    process.exit(1);
   });
 }
 
-if (require.main === module) main();
-
-module.exports = { runGenerator, main };
+export { runNode, stepBanner, ensureDir };
