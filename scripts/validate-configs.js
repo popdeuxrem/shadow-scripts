@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * scripts/validate-configs.js — Enhanced v3
+ * scripts/validate-configs.js — Enhanced v4 (autofix support)
  * - Robust validation for manifest, obfuscated outputs, metadata, and configs
+ * - Attempts to autofix missing text configs by running generator scripts when --autofix is provided
  * - Handles legacy and canonical filenames: .js, .ob.js, .ob.js.b64, .b64
- * - Reads pipeline-report.json for additional diagnostics
  */
 
 import fs from 'fs';
 import path from 'path';
+import child from 'child_process';
 import yaml from 'js-yaml';
 import plist from 'plist';
 import { fileURLToPath } from 'url';
@@ -18,9 +19,14 @@ const CONF_DIR = path.join(ROOT, 'apps/loader/public/configs');
 const OBF_DIR = path.join(ROOT, 'apps/loader/public/obfuscated');
 const PUBLIC_DIR = path.join(ROOT, 'apps/loader/public');
 
+const ARGV = process.argv.slice(2);
+const AUTOFIX = ARGV.includes('--autofix') || ARGV.includes('-a');
+const CI_MODE = ARGV.includes('--ci');
+
 const die = msg => { console.error(`\x1b[31m❌ ${msg}\x1b[0m`); process.exit(1); };
 const warn = msg => console.warn(`\x1b[33m⚠ ${msg}\x1b[0m`);
 const log = msg => console.log(`\x1b[36m🔹 ${msg}\x1b[0m`);
+const info = msg => console.log(`\x1b[34mℹ ${msg}\x1b[0m`);
 
 function existsAndNonEmpty(fp) {
   try {
@@ -30,41 +36,46 @@ function existsAndNonEmpty(fp) {
   }
 }
 
+function runGeneratorIfExists(scriptRelPath, outputPath) {
+  const scriptPath = path.join(ROOT, scriptRelPath);
+  if (!fs.existsSync(scriptPath)) {
+    warn(`Generator not found: ${scriptRelPath}`);
+    return false;
+  }
+  try {
+    info(`Running generator: node ${scriptRelPath} -> ${path.relative(ROOT, outputPath)}`);
+    // run generator and redirect stdout into output
+    const out = child.execSync(`node ${scriptPath}`, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, out);
+    return existsAndNonEmpty(outputPath);
+  } catch (e) {
+    warn(`Generator ${scriptRelPath} failed: ${e.message}`);
+    return false;
+  }
+}
+
 // Normalize a manifest entry into possible canonical obfuscated filenames (relative to OBF_DIR)
 function expectedObfFilesFromPayload(payloadPath) {
-  // Accept payloadPath formats:
-  // - "obfuscated/dir/name.ob.js"
-  // - "obfuscated/dir/name.ob.js.b64"
-  // - "obfuscated/dir/name.js"
-  // - "name.js" or "name"
-  // - "obfuscated/name.b64"
   const candidates = [];
   let rel = payloadPath || '';
 
-  // strip leading "obfuscated/" if present
   if (rel.startsWith('obfuscated/')) rel = rel.slice('obfuscated/'.length);
 
-  // if only basename (no extension), assume .js
   const parsed = path.parse(rel);
   let base = parsed.name;
-  // handle names that end with ".ob.js" when parsed.name dropped ".js" - ensure canonical base
   if (rel.endsWith('.ob.js')) {
     base = path.basename(rel, '.ob.js');
   }
 
   const dir = parsed.dir || '';
 
-  // canonical paths we expect (ordered by preferred)
-  // 1) name.ob.js
   candidates.push(path.join(OBF_DIR, dir, `${base}.ob.js`));
-  // 2) name.ob.js.b64
   candidates.push(path.join(OBF_DIR, dir, `${base}.ob.js.b64`));
-  // 3) legacy: name.js and name.js.b64 (some older flows)
   candidates.push(path.join(OBF_DIR, dir, `${base}.js`));
   candidates.push(path.join(OBF_DIR, dir, `${base}.js.b64`));
-  // 4) direct base64 filename if someone passed name.b64 or name.ob.js.b64 explicitly
   if (rel.endsWith('.b64')) {
-    candidates.unshift(path.join(OBF_DIR, rel)); // put explicit .b64 at front
+    candidates.unshift(path.join(OBF_DIR, rel));
   }
   return candidates;
 }
@@ -78,38 +89,59 @@ function readManifestPayloads() {
   try { manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')); }
   catch (e) { die(`manifest.json not valid JSON: ${e.message}`); }
 
-  // Normalize payloads
   let payloads = [];
   if (Array.isArray(manifest)) {
     payloads = manifest;
   } else if (manifest.payloads && Array.isArray(manifest.payloads)) {
-    // payload objects or strings
     payloads = manifest.payloads.map(p => (typeof p === 'string' ? p : (p.path || p)));
   } else if (manifest.files && Array.isArray(manifest.files)) {
     payloads = manifest.files;
   } else if (manifest.assets && Array.isArray(manifest.assets)) {
-    // new format: assets array with filename property
     payloads = manifest.assets.map(a => a.filename || a.path || a);
   } else {
     die('manifest.json missing payloads/files/assets array (expected top-level array or { payloads/files/assets: [...] } )');
   }
 
-  // filter/normalize strings only
   return payloads.filter(Boolean).map(String);
 }
 
-// Validate text configs (Shadowrocket, Loon)
-['shadowrocket.conf', 'loon.conf'].forEach(f => {
-  const fp = path.join(CONF_DIR, f);
-  if (!existsAndNonEmpty(fp)) die(`text config missing or empty: ${fp}`);
-  const txt = fs.readFileSync(fp, 'utf8');
-  if (!/\[Rule\]/i.test(txt) && !/\[General\]/i.test(txt)) {
-    die(`[Rule] or [General] section missing or malformed in ${f}`);
-  }
-  log(`Validated text config: ${f}`);
-});
+// ---------- Start Validation ----------
 
-// Validate stash.yaml more defensively
+// Ensure config directory exists (may be created by build script)
+fs.mkdirSync(CONF_DIR, { recursive: true });
+
+// TEXT CONFIGS: shadowrocket.conf and loon.conf (auto-fixable)
+const textConfigs = [
+  { name: 'shadowrocket.conf', generator: 'scripts/gen-shadowrocket.js', validators: [/\[Rule\]/i, /\[General\]/i] },
+  { name: 'loon.conf', generator: 'scripts/gen-loon.js', validators: [/\[Rule\]/i, /\[General\]/i] }
+];
+
+for (const cfg of textConfigs) {
+  const fp = path.join(CONF_DIR, cfg.name);
+  if (!existsAndNonEmpty(fp)) {
+    warn(`${cfg.name} missing or empty: ${fp}`);
+    if (AUTOFIX) {
+      log(`Attempting to auto-generate ${cfg.name} using ${cfg.generator}...`);
+      const ok = runGeneratorIfExists(cfg.generator, fp);
+      if (!ok) {
+        warn(`Auto-generation failed or produced empty file for ${cfg.name}`);
+      }
+    }
+  }
+
+  if (!existsAndNonEmpty(fp)) {
+    die(`text config missing or empty: ${fp} (hint: run the generator ${cfg.generator} or provide the file)`);
+  }
+
+  const txt = fs.readFileSync(fp, 'utf8');
+  const valid = cfg.validators.some(rx => rx.test(txt));
+  if (!valid) {
+    die(`[Rule] or [General] section missing or malformed in ${cfg.name}`);
+  }
+  log(`Validated text config: ${cfg.name}`);
+}
+
+// Validate stash.yaml (strict)
 (() => {
   const fp = path.join(CONF_DIR, 'stash.yaml');
   if (!existsAndNonEmpty(fp)) die(`stash.yaml missing or empty: ${fp}`);
@@ -123,7 +155,7 @@ function readManifestPayloads() {
   } catch (e) { die(`invalid YAML stash.yaml: ${e.message}`); }
 })();
 
-// Validate any mobileconfig files present (flexible)
+// Validate mobileconfig files (flexible)
 (() => {
   const files = fs.existsSync(CONF_DIR) ? fs.readdirSync(CONF_DIR).filter(f => f.endsWith('.mobileconfig')) : [];
   if (files.length === 0) {
@@ -134,7 +166,6 @@ function readManifestPayloads() {
     const fp = path.join(CONF_DIR, f);
     try {
       const p = plist.parse(fs.readFileSync(fp, 'utf8'));
-      // best-effort check for DNS or PayloadContent presence
       if (!p || (!p.PayloadContent && !p.PayloadType)) {
         die(`mobileconfig seems malformed or missing expected top-level payloads: ${fp}`);
       }
@@ -174,7 +205,6 @@ function readManifestPayloads() {
   let missingCount = 0;
   payloads.forEach(p => {
     const candidates = expectedObfFilesFromPayload(p);
-    // find first candidate that exists
     const found = candidates.find(c => existsAndNonEmpty(c));
     if (!found) {
       console.error(`❌ Missing obfuscated payload for manifest entry: ${p}`);
@@ -182,12 +212,10 @@ function readManifestPayloads() {
       candidates.forEach(c => console.error(`     - ${path.relative(ROOT, c)}`));
       missingCount++;
     } else {
-      // also ensure metadata exists and contains a hash
-      const metaPath = found.replace(/(\.ob\.js|\.js)$/, '.ob.js.meta.json'); // prefer canonical meta name
+      const metaPath = found.replace(/(\.ob\.js|\.js)$/, '.ob.js.meta.json');
       const altMeta = found + '.meta.json';
       const metaToRead = existsAndNonEmpty(metaPath) ? metaPath : (existsAndNonEmpty(altMeta) ? altMeta : null);
       if (!metaToRead) {
-        // try legacy .meta.json alongside .b64
         const b64Meta = found.replace(/(\.ob\.js|\.js)$/, '.meta.json');
         if (existsAndNonEmpty(b64Meta)) {
           log(`Using legacy metadata file: ${path.relative(ROOT, b64Meta)}`);
@@ -197,7 +225,6 @@ function readManifestPayloads() {
       } else {
         try {
           const m = JSON.parse(fs.readFileSync(metaToRead, 'utf8'));
-          // accept multiple shapes
           const hash =
             (m && m.obfuscated && m.obfuscated.hash) ||
             (m && m.integrity && m.integrity.hash) ||
