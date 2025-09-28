@@ -1,16 +1,13 @@
 #!/usr/bin/env node
 /**
- * gen-all.js v4.0.0
+ * gen-all.js v4.1.0
  * ─────────────────────────────────────────────
  * Unified All-in-One Config Generator
- * Handles:
- *   - Shadowrocket / Loon / Stash / Tunna / Egern / Mobileconfig
- *   - Obfuscation
- *   - Dashboard & index loader
- *   - Catalog
- *   - QR codes
- *   - Pipeline JSON report
- *   - CI/CD friendly
+ * Enhancements:
+ *  - Auto-install missing Node dependencies
+ *  - Fail-safe per generator
+ *  - Debug logging
+ *  - Step timers
  */
 
 import fs from "fs";
@@ -20,10 +17,13 @@ import { execSync } from "child_process";
 ////////////////////////////////////////////////////////////////////////////////
 // Helpers
 ////////////////////////////////////////////////////////////////////////////////
+const DEBUG = process.argv.includes("--debug");
 function logInfo(msg)    { console.log(`\x1b[36m[INFO]\x1b[0m ${msg}`); }
 function logSuccess(msg) { console.log(`\x1b[32m[SUCCESS]\x1b[0m ${msg}`); }
 function logWarn(msg)    { console.log(`\x1b[33m[WARN]\x1b[0m ${msg}`); }
 function logError(msg)   { console.error(`\x1b[31m[ERROR]\x1b[0m ${msg}`); }
+
+function debug(msg) { if (DEBUG) console.log(`\x1b[90m[DEBUG]\x1b[0m ${msg}`); }
 
 function gitCommit() {
   try { return execSync("git rev-parse --short HEAD").toString().trim(); }
@@ -34,12 +34,28 @@ function stepBanner(step, total, title) {
   console.log(`\n\x1b[35m=== [${step}/${total}] ${title} ===\x1b[0m`);
 }
 
-function runCommand(cmd, args = []) {
+function ensureDir(dir) { fs.mkdirSync(dir, { recursive: true }); }
+function fileExists(file) { return fs.existsSync(file); }
+
+////////////////////////////////////////////////////////////////////////////////
+// Node Runner
+////////////////////////////////////////////////////////////////////////////////
+function runNode(script, args = []) {
+  const ROOT_DIR = path.resolve(".");
+  const scriptPath = path.resolve(ROOT_DIR, "scripts", script);
+  if (!fileExists(scriptPath)) {
+    logWarn(`Script missing: ${script}`);
+    return { ok: false, error: "missing" };
+  }
   try {
-    return execSync([cmd, ...args].join(" "), { encoding: "utf-8" });
+    const cmd = `node ${scriptPath} ${args.join(" ")}`;
+    debug(`Running: ${cmd}`);
+    const result = execSync(cmd, { encoding: "utf-8" });
+    logSuccess(`✅ ${script} → OK`);
+    return { ok: true, output: result.trim() };
   } catch (err) {
-    logWarn(`Command failed: ${cmd} ${args.join(" ")} → ${err.message}`);
-    return null;
+    logWarn(`❌ ${script} failed: ${err.message}`);
+    return { ok: false, error: err.message };
   }
 }
 
@@ -57,24 +73,17 @@ const GIT_HASH = gitCommit();
 const VERSION = process.env.VERSION || "0.0.0";
 
 ////////////////////////////////////////////////////////////////////////////////
-// Utilities
+// Dependency Auto-Check
 ////////////////////////////////////////////////////////////////////////////////
-function ensureDir(dir) { fs.mkdirSync(dir, { recursive: true }); }
-function fileExists(file) { return fs.existsSync(file); }
-function runNode(script, args = []) {
-  const scriptPath = path.resolve(ROOT_DIR, "scripts", script);
-  if (!fileExists(scriptPath)) {
-    logWarn(`Script missing: ${script}`);
-    return null;
-  }
-  try {
-    const result = execSync(`node ${scriptPath} ${args.join(" ")}`, { encoding: "utf-8" });
-    logSuccess(`✅ ${script} → OK`);
-    return result.trim();
-  } catch (err) {
-    logWarn(`❌ ${script} failed: ${err.message}`);
-    return null;
-  }
+function ensureDependencies(pkgs = ["js-yaml"]) {
+  pkgs.forEach(pkg => {
+    try { require.resolve(pkg); }
+    catch {
+      logWarn(`Dependency missing: ${pkg}, installing...`);
+      execSync(`pnpm add -D ${pkg}`, { stdio: DEBUG ? "inherit" : "ignore" });
+      logSuccess(`Installed: ${pkg}`);
+    }
+  });
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -83,7 +92,9 @@ function runNode(script, args = []) {
 async function main() {
   const startTime = Date.now();
   let step = 1;
-  const totalSteps = 7;
+  const totalSteps = 8;
+
+  ensureDependencies(["js-yaml"]);
 
   stepBanner(step++, totalSteps, "Obfuscating payloads");
   ensureDir(path.join(ROOT_DIR, "apps/loader/public/obfuscated"));
@@ -100,12 +111,13 @@ async function main() {
     "gen-egern.js",
   ];
   const results = generators.map(gen => {
-    const outFile = path.join(OUT_DIR, path.basename(gen).replace("gen-", "").replace(".js", ".conf"));
-    runNode(gen, ["--outdir=" + OUT_DIR]);
-    return { generator: gen, output: outFile };
+    const normalized = path.basename(gen).replace("gen-", "").replace(".js", ".conf");
+    const outFile = path.join(OUT_DIR, normalized);
+    const res = runNode(gen, ["--outdir=" + OUT_DIR]);
+    return { generator: gen, output: outFile, ok: res.ok, error: res.error || null };
   });
 
-  stepBanner(step++, totalSteps, "Generating manifest & loader");
+  stepBanner(step++, totalSteps, "Generating manifest & loaders");
   runNode("gen-manifest.js", ["--ci"]);
   runNode("gen-dashboard.js", ["--ci"]);
   runNode("gen-index-loader.js", ["--ci"]);
