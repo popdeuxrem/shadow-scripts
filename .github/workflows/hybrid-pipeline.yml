@@ -39,15 +39,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js ${{ env.NODE_VERSION }}
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Enable pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
 
       - name: Restore pnpm cache
         uses: actions/cache@v4
@@ -61,6 +56,9 @@ jobs:
 
       - name: Install Dependencies
         run: |
+          corepack enable
+          corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
+          pnpm -v
           if [ -f pnpm-lock.yaml ]; then
             echo "pnpm-lock.yaml found, installing with frozen lockfile"
             pnpm install --frozen-lockfile --prefer-offline
@@ -95,6 +93,9 @@ jobs:
 
       - name: Install dependencies (build)
         run: |
+          corepack enable
+          corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
+          pnpm -v
           if [ -f pnpm-lock.yaml ]; then
             echo "pnpm-lock.yaml found, installing with frozen lockfile"
             pnpm install --frozen-lockfile --prefer-offline
@@ -152,6 +153,7 @@ jobs:
         run: |
           corepack enable
           corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
+          pnpm -v
           if [ -f pnpm-lock.yaml ]; then
             echo "pnpm-lock.yaml found, installing with frozen lockfile"
             pnpm install --frozen-lockfile
