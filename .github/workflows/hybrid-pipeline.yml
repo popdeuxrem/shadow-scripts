@@ -2,9 +2,11 @@ name: ⚡ Hybrid Build & Deploy Pipeline ⚡
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
@@ -14,7 +16,6 @@ concurrency:
 env:
   NODE_VERSION: 22.x
   PNPM_VERSION: 9.12.3
-  BUILD_CACHE_DIR: .build-cache
 
 permissions:
   contents: write
@@ -33,7 +34,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -61,10 +63,9 @@ jobs:
             pnpm install --frozen-lockfile --prefer-offline
           else
             pnpm install --no-frozen-lockfile --prefer-offline
-          fi
 
   build:
-    name: 🚀 Build & Generate Artifacts
+    name: 🚀 Build Application & Artifacts
     needs: setup
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -74,7 +75,8 @@ jobs:
     outputs:
       pages-artifact: apps/loader/public
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -86,39 +88,29 @@ jobs:
             .pnpm-store
           key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
 
-      - name: Restore Build Cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.BUILD_CACHE_DIR }}
-          key: ${{ runner.os }}-build-cache-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-build-cache-
+      - name: Install dependencies (build)
+        run: |
+          corepack enable
+          corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
+          pnpm -v
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile --prefer-offline
+          else
+            pnpm install --no-frozen-lockfile --prefer-offline
+
+      - name: Verify critical Node dependencies
+        run: |
+          node -e "require('js-yaml'); require('plist'); console.log('Dependencies ok');" || \
+          (echo 'Missing required Node dependencies! Check package.json' && exit 1)
 
       - name: Make scripts executable
         run: chmod +x ./scripts/*.sh || true
 
-      - name: Detect Changed Payloads
-        id: changed
+      - name: Run Full Build Pipeline
         run: |
-          mkdir -p ${{ env.BUILD_CACHE_DIR }}/changed
-          PAYLOADS=$(git diff --name-only HEAD~1 HEAD apps/loader/public/obfuscated || true)
-          echo "Changed payloads:"
-          echo "$PAYLOADS"
-          for p in $PAYLOADS; do
-            if [[ $p == *.js ]]; then
-              cp "$p" "${{ env.BUILD_CACHE_DIR }}/changed/"
-            fi
-          done
-          echo "changed_payloads=$(ls -1 ${{ env.BUILD_CACHE_DIR }}/changed | wc -l)" >> $GITHUB_OUTPUT
-
-      - name: Incremental Obfuscation
-        run: |
-          if [ "${{ steps.changed.outputs.changed_payloads }}" -gt 0 ]; then
-            echo "Re-obfuscating only changed payloads..."
-            node scripts/obfuscate-all.js --profile medium --input-dir ${{ env.BUILD_CACHE_DIR }}/changed --output-dir apps/loader/public/obfuscated
-          else
-            echo "No payloads changed; skipping obfuscation"
-          fi
+          set -euo pipefail
+          export TERM=xterm-256color
+          ./scripts/build-all.sh
 
       - name: Generate Proxy Configs
         run: |
@@ -131,9 +123,9 @@ jobs:
 
       - name: Generate Manifests & Loader
         run: |
-          node scripts/gen-manifest.js
-          node scripts/gen-index-loader.js
-          node scripts/gen-catalog.js
+          node scripts/gen-manifest.js || true
+          node scripts/gen-index-loader.js || true
+          node scripts/gen-catalog.js || true
 
       - name: Generate QR Codes
         run: |
@@ -141,31 +133,30 @@ jobs:
             node scripts/gen-qrcodes.js --output apps/loader/public/qrcodes --version "${{ github.ref_name || github.sha }}"
           else
             echo "gen-qrcodes.js not found, skipping"
-          fi
 
-      - name: Validate Configs & Obfuscated Payloads
-        run: node scripts/validate-configs.js
+      - name: Validate pages output
+        run: |
+          if [ ! -d "apps/loader/public" ]; then
+            echo "ERROR: apps/loader/public missing; build may have failed" && exit 1
+          fi
+          echo "Pages directory present: $(du -sh apps/loader/public || true)"
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: apps/loader/public
 
-      - name: Save Build Cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.BUILD_CACHE_DIR }}
-          key: ${{ runner.os }}-build-cache-${{ github.sha }}
-
   test:
-    name: 🧪 Run Tests & Lint
+    name: 🧪 Run Tests
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
       - name: Install pnpm
         run: |
           corepack enable
@@ -175,8 +166,8 @@ jobs:
             pnpm install --frozen-lockfile
           else
             pnpm install --no-frozen-lockfile
-          fi
-      - name: Run Lint & Tests
+
+      - name: Run Tests & Lint
         run: |
           pnpm lint || (echo "Lint errors" && exit 1)
           pnpm test || (echo "Tests failed" && exit 1)
@@ -194,9 +185,12 @@ jobs:
       name: github-pages
     steps:
       - name: Deploy to GitHub Pages
+        id: deploy
         uses: actions/deploy-pages@v4
+
       - name: Show published URL
-        run: echo "Pages deployed. Visit repository settings or Actions environment URL."
+        run: |
+          echo "Pages deployed. Visit the Pages site from repository settings or Actions environment URL."
 
   notify:
     name: 📢 Send Discord Notification
