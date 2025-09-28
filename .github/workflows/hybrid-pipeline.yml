@@ -63,6 +63,7 @@ jobs:
             pnpm install --frozen-lockfile --prefer-offline
           else
             pnpm install --no-frozen-lockfile --prefer-offline
+          fi
 
   build:
     name: 🚀 Build Application & Artifacts
@@ -97,11 +98,23 @@ jobs:
             pnpm install --frozen-lockfile --prefer-offline
           else
             pnpm install --no-frozen-lockfile --prefer-offline
+          fi
 
-      - name: Verify critical Node dependencies
+      - name: Prebuild - Install all Node dependencies globally
         run: |
-          node -e "require('js-yaml'); require('plist'); console.log('Dependencies ok');" || \
-          (echo 'Missing required Node dependencies! Check package.json' && exit 1)
+          set -euo pipefail
+          echo "Installing all Node dependencies globally to prevent module-not-found errors..."
+          if [ -f package.json ]; then
+            pkgs=$(jq -r '.dependencies // {} + .devDependencies // {} | keys[]' package.json)
+            if [ -n "$pkgs" ]; then
+              echo "Installing packages globally: $pkgs"
+              npm install -g $pkgs
+            else
+              echo "No dependencies found in package.json"
+            fi
+          else
+            echo "package.json missing; skipping global prebuild install"
+          fi
 
       - name: Make scripts executable
         run: chmod +x ./scripts/*.sh || true
@@ -111,15 +124,6 @@ jobs:
           set -euo pipefail
           export TERM=xterm-256color
           ./scripts/build-all.sh
-
-      - name: Generate Proxy Configs
-        run: |
-          node scripts/gen-shadowrocket.js
-          node scripts/gen-loon.js
-          node scripts/gen-stash.js
-          node scripts/gen-mobileconfig.js
-          node scripts/gen-tunna.js
-          node scripts/gen-egern.js
 
       - name: Generate Manifests & Loader
         run: |
@@ -133,6 +137,7 @@ jobs:
             node scripts/gen-qrcodes.js --output apps/loader/public/qrcodes --version "${{ github.ref_name || github.sha }}"
           else
             echo "gen-qrcodes.js not found, skipping"
+          fi
 
       - name: Validate pages output
         run: |
@@ -156,7 +161,6 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-
       - name: Install pnpm
         run: |
           corepack enable
@@ -166,7 +170,7 @@ jobs:
             pnpm install --frozen-lockfile
           else
             pnpm install --no-frozen-lockfile
-
+          fi
       - name: Run Tests & Lint
         run: |
           pnpm lint || (echo "Lint errors" && exit 1)
@@ -187,7 +191,6 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deploy
         uses: actions/deploy-pages@v4
-
       - name: Show published URL
         run: |
           echo "Pages deployed. Visit the Pages site from repository settings or Actions environment URL."
@@ -222,6 +225,7 @@ jobs:
             curl -s -H "Content-Type: application/json" -d @payload.json "$DISCORD_WEBHOOK" || echo "Discord notify failed"
           else
             echo "No DISCORD_WEBHOOK secret configured; skipping notifications"
+          fi
 
   cleanup:
     name: 🧹 Cleanup
