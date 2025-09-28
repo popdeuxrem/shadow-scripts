@@ -2,12 +2,15 @@
 /**
  * gen-all.js v4.1.0
  * ─────────────────────────────────────────────
- * Unified All-in-One Config Generator
- * Enhancements:
- *  - Auto-install missing Node dependencies
- *  - Fail-safe per generator
- *  - Debug logging
- *  - Step timers
+ * Unified All-in-One Config Generator (ES Module)
+ * Handles:
+ *   - Shadowrocket / Loon / Stash / Tunna / Egern / Mobileconfig
+ *   - Obfuscation
+ *   - Dashboard & index loader
+ *   - Catalog
+ *   - QR codes
+ *   - Pipeline JSON report
+ *   - CI/CD friendly
  */
 
 import fs from "fs";
@@ -17,13 +20,10 @@ import { execSync } from "child_process";
 ////////////////////////////////////////////////////////////////////////////////
 // Helpers
 ////////////////////////////////////////////////////////////////////////////////
-const DEBUG = process.argv.includes("--debug");
 function logInfo(msg)    { console.log(`\x1b[36m[INFO]\x1b[0m ${msg}`); }
 function logSuccess(msg) { console.log(`\x1b[32m[SUCCESS]\x1b[0m ${msg}`); }
 function logWarn(msg)    { console.log(`\x1b[33m[WARN]\x1b[0m ${msg}`); }
 function logError(msg)   { console.error(`\x1b[31m[ERROR]\x1b[0m ${msg}`); }
-
-function debug(msg) { if (DEBUG) console.log(`\x1b[90m[DEBUG]\x1b[0m ${msg}`); }
 
 function gitCommit() {
   try { return execSync("git rev-parse --short HEAD").toString().trim(); }
@@ -34,28 +34,12 @@ function stepBanner(step, total, title) {
   console.log(`\n\x1b[35m=== [${step}/${total}] ${title} ===\x1b[0m`);
 }
 
-function ensureDir(dir) { fs.mkdirSync(dir, { recursive: true }); }
-function fileExists(file) { return fs.existsSync(file); }
-
-////////////////////////////////////////////////////////////////////////////////
-// Node Runner
-////////////////////////////////////////////////////////////////////////////////
-function runNode(script, args = []) {
-  const ROOT_DIR = path.resolve(".");
-  const scriptPath = path.resolve(ROOT_DIR, "scripts", script);
-  if (!fileExists(scriptPath)) {
-    logWarn(`Script missing: ${script}`);
-    return { ok: false, error: "missing" };
-  }
+function runCommand(cmd, args = []) {
   try {
-    const cmd = `node ${scriptPath} ${args.join(" ")}`;
-    debug(`Running: ${cmd}`);
-    const result = execSync(cmd, { encoding: "utf-8" });
-    logSuccess(`✅ ${script} → OK`);
-    return { ok: true, output: result.trim() };
+    return execSync([cmd, ...args].join(" "), { encoding: "utf-8" });
   } catch (err) {
-    logWarn(`❌ ${script} failed: ${err.message}`);
-    return { ok: false, error: err.message };
+    logWarn(`Command failed: ${cmd} ${args.join(" ")} → ${err.message}`);
+    return null;
   }
 }
 
@@ -73,17 +57,24 @@ const GIT_HASH = gitCommit();
 const VERSION = process.env.VERSION || "0.0.0";
 
 ////////////////////////////////////////////////////////////////////////////////
-// Dependency Auto-Check
+// Utilities
 ////////////////////////////////////////////////////////////////////////////////
-function ensureDependencies(pkgs = ["js-yaml"]) {
-  pkgs.forEach(pkg => {
-    try { require.resolve(pkg); }
-    catch {
-      logWarn(`Dependency missing: ${pkg}, installing...`);
-      execSync(`pnpm add -D ${pkg}`, { stdio: DEBUG ? "inherit" : "ignore" });
-      logSuccess(`Installed: ${pkg}`);
-    }
-  });
+function ensureDir(dir) { fs.mkdirSync(dir, { recursive: true }); }
+function fileExists(file) { return fs.existsSync(file); }
+function runNode(script, args = []) {
+  const scriptPath = path.resolve(ROOT_DIR, "scripts", script);
+  if (!fileExists(scriptPath)) {
+    logWarn(`Script missing: ${script}`);
+    return null;
+  }
+  try {
+    const result = execSync(`node ${scriptPath} ${args.join(" ")}`, { encoding: "utf-8" });
+    logSuccess(`✅ ${script} → OK`);
+    return result.trim();
+  } catch (err) {
+    logWarn(`❌ ${script} failed: ${err.message}`);
+    return null;
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -92,14 +83,14 @@ function ensureDependencies(pkgs = ["js-yaml"]) {
 async function main() {
   const startTime = Date.now();
   let step = 1;
-  const totalSteps = 8;
+  const totalSteps = 7;
 
-  ensureDependencies(["js-yaml"]);
-
+  // Step 1: Obfuscate payloads
   stepBanner(step++, totalSteps, "Obfuscating payloads");
   ensureDir(path.join(ROOT_DIR, "apps/loader/public/obfuscated"));
   runNode("obfuscate-all.js", ["--profile=medium"]);
 
+  // Step 2: Generate all configs
   stepBanner(step++, totalSteps, "Generating all configs");
   ensureDir(OUT_DIR);
   const generators = [
@@ -111,26 +102,29 @@ async function main() {
     "gen-egern.js",
   ];
   const results = generators.map(gen => {
-    const normalized = path.basename(gen).replace("gen-", "").replace(".js", ".conf");
-    const outFile = path.join(OUT_DIR, normalized);
-    const res = runNode(gen, ["--outdir=" + OUT_DIR]);
-    return { generator: gen, output: outFile, ok: res.ok, error: res.error || null };
+    const outFile = path.join(OUT_DIR, path.basename(gen).replace("gen-", "").replace(".js", ".conf"));
+    runNode(gen, ["--outdir=" + OUT_DIR]);
+    return { generator: gen, output: outFile };
   });
 
-  stepBanner(step++, totalSteps, "Generating manifest & loaders");
+  // Step 3: Generate manifest & loaders
+  stepBanner(step++, totalSteps, "Generating manifest & loader");
   runNode("gen-manifest.js", ["--ci"]);
   runNode("gen-dashboard.js", ["--ci"]);
   runNode("gen-index-loader.js", ["--ci"]);
   runNode("gen-catalog.js", ["--ci"]);
 
+  // Step 4: Generate QR codes
   stepBanner(step++, totalSteps, "Generating QR codes");
   ensureDir(QR_DIR);
   runNode("gen-qrcodes.js", ["--output", QR_DIR, "--version", GIT_HASH]);
 
+  // Step 5: Validate configs & gitignore
   stepBanner(step++, totalSteps, "Validating configs & gitignore");
   runNode("validate-gitignore.js");
   runNode("validate-configs.js");
 
+  // Step 6: Write pipeline report
   stepBanner(step++, totalSteps, "Writing pipeline report");
   ensureDir(OUT_DIR);
   const report = {
@@ -143,6 +137,7 @@ async function main() {
   fs.writeFileSync(path.join(OUT_DIR, "pipeline-report.json"), JSON.stringify(report, null, 2));
   logSuccess(`Pipeline report written: ${OUT_DIR}/pipeline-report.json`);
 
+  // Step 7: Build summary
   stepBanner(step++, totalSteps, "Build summary");
   console.log("──────────────────────────────");
   console.log(`📦 Obfuscated payloads: ${fs.readdirSync(path.join(ROOT_DIR, "apps/loader/public/obfuscated")).length}`);
@@ -154,13 +149,15 @@ async function main() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Execute
+// Execute (ES module compatible)
 ////////////////////////////////////////////////////////////////////////////////
-if (require.main === module) {
+const isMain = import.meta.url === `file://${process.argv[1]}`;
+if (isMain) {
   main().catch(err => {
     logError(`Pipeline failed: ${err.message}`);
     process.exit(1);
   });
 }
 
+// Exports for testing
 export { runNode, stepBanner, ensureDir };
