@@ -16,7 +16,6 @@ concurrency:
 env:
   NODE_VERSION: 20.x
   PNPM_VERSION: 9.12.3
-  CACHE_KEY: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
 
 permissions:
   contents: write
@@ -31,8 +30,6 @@ jobs:
   setup:
     name: 🔧 Setup Environment
     runs-on: ubuntu-latest
-    outputs:
-      cache-key: ${{ env.CACHE_KEY }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -55,7 +52,7 @@ jobs:
           path: |
             ~/.pnpm-store
             .pnpm-store
-          key: ${{ env.CACHE_KEY }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pnpm-
 
@@ -80,7 +77,7 @@ jobs:
           path: |
             ~/.pnpm-store
             .pnpm-store
-          key: ${{ env.CACHE_KEY }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
 
       - name: Install dependencies (build)
         run: pnpm install --frozen-lockfile --prefer-offline
