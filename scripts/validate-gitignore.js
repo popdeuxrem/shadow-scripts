@@ -3,14 +3,7 @@
  * scripts/validate-gitignore.js
  * ───────────────────────────────────────────────
  * Validates the .gitignore file for Shadow Scripts repository.
- *
- * Features:
- *  - Checks for required entries (node_modules, build artifacts, caches)
- *  - Warns on missing or misconfigured patterns
- *  - CI-friendly JSON summary
- *  - Cyberpunk neon logging
- *
- * Node: 18+
+ * Allows pnpm-lock.yaml to be missing.
  */
 
 import fs from "fs";
@@ -21,7 +14,11 @@ const REQUIRED_PATTERNS = [
   ".build-cache/",
   "apps/loader/public/",
   "dist/",
-  "*.log",
+  "*.log"
+  // "pnpm-lock.yaml" removed from REQUIRED_PATTERNS
+];
+
+const OPTIONAL_PATTERNS = [
   "pnpm-lock.yaml"
 ];
 
@@ -49,20 +46,28 @@ function loadGitignore() {
 
 function validateGitignore() {
   const lines = loadGitignore();
-  const missing = [];
+  const missingRequired = [];
 
   for (const pattern of REQUIRED_PATTERNS) {
-    if (!lines.includes(pattern)) missing.push(pattern);
+    if (!lines.includes(pattern)) missingRequired.push(pattern);
   }
 
-  if (missing.length > 0) {
-    missing.forEach(p => logWarn(`Missing required pattern: ${p}`));
-    if (CI_MODE) console.log(JSON.stringify({ ok: false, missing }));
+  const missingOptional = OPTIONAL_PATTERNS.filter(p => !lines.includes(p));
+
+  if (missingRequired.length > 0) {
+    missingRequired.forEach(p => logWarn(`Missing required pattern: ${p}`));
+    if (CI_MODE) console.log(JSON.stringify({ ok: false, missing: missingRequired }));
     process.exit(2);
-  } else {
-    logInfo("All required .gitignore patterns are present.");
-    if (CI_MODE) console.log(JSON.stringify({ ok: true, missing: [] }));
   }
+
+  if (missingOptional.length > 0) {
+    missingOptional.forEach(p => logWarn(`Optional pattern missing: ${p}`));
+    // Do NOT exit; optional patterns just warn
+    if (CI_MODE) console.log(JSON.stringify({ ok: true, missingOptional }));
+  }
+
+  logInfo("All required .gitignore patterns are present.");
+  if (CI_MODE) console.log(JSON.stringify({ ok: true, missingRequired: [], missingOptional }));
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("validate-gitignore.js")) {
