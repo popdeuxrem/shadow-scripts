@@ -2,11 +2,9 @@ name: ⚡ Hybrid Build & Deploy Pipeline ⚡
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -16,6 +14,7 @@ concurrency:
 env:
   NODE_VERSION: 22.x
   PNPM_VERSION: 9.12.3
+  BUILD_CACHE_DIR: .build-cache
 
 permissions:
   contents: write
@@ -34,8 +33,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -60,15 +58,13 @@ jobs:
           corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
           pnpm -v
           if [ -f pnpm-lock.yaml ]; then
-            echo "pnpm-lock.yaml found, installing with frozen lockfile"
             pnpm install --frozen-lockfile --prefer-offline
           else
-            echo "pnpm-lock.yaml missing, installing without frozen lockfile"
             pnpm install --no-frozen-lockfile --prefer-offline
           fi
 
   build:
-    name: 🚀 Build Application & Artifacts
+    name: 🚀 Build & Generate Artifacts
     needs: setup
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -78,8 +74,7 @@ jobs:
     outputs:
       pages-artifact: apps/loader/public
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -91,33 +86,54 @@ jobs:
             .pnpm-store
           key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
 
-      - name: Install dependencies (build)
-        run: |
-          corepack enable
-          corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
-          pnpm -v
-          if [ -f pnpm-lock.yaml ]; then
-            echo "pnpm-lock.yaml found, installing with frozen lockfile"
-            pnpm install --frozen-lockfile --prefer-offline
-          else
-            echo "pnpm-lock.yaml missing, installing without frozen lockfile"
-            pnpm install --no-frozen-lockfile --prefer-offline
-          fi
+      - name: Restore Build Cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BUILD_CACHE_DIR }}
+          key: ${{ runner.os }}-build-cache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-build-cache-
 
       - name: Make scripts executable
         run: chmod +x ./scripts/*.sh || true
 
-      - name: Run Full Build Pipeline
+      - name: Detect Changed Payloads
+        id: changed
         run: |
-          set -euo pipefail
-          export TERM=xterm-256color
-          ./scripts/build-all.sh
+          mkdir -p ${{ env.BUILD_CACHE_DIR }}/changed
+          PAYLOADS=$(git diff --name-only HEAD~1 HEAD apps/loader/public/obfuscated || true)
+          echo "Changed payloads:"
+          echo "$PAYLOADS"
+          for p in $PAYLOADS; do
+            if [[ $p == *.js ]]; then
+              cp "$p" "${{ env.BUILD_CACHE_DIR }}/changed/"
+            fi
+          done
+          echo "changed_payloads=$(ls -1 ${{ env.BUILD_CACHE_DIR }}/changed | wc -l)" >> $GITHUB_OUTPUT
+
+      - name: Incremental Obfuscation
+        run: |
+          if [ "${{ steps.changed.outputs.changed_payloads }}" -gt 0 ]; then
+            echo "Re-obfuscating only changed payloads..."
+            node scripts/obfuscate-all.js --profile medium --input-dir ${{ env.BUILD_CACHE_DIR }}/changed --output-dir apps/loader/public/obfuscated
+          else
+            echo "No payloads changed; skipping obfuscation"
+          fi
+
+      - name: Generate Proxy Configs
+        run: |
+          node scripts/gen-shadowrocket.js
+          node scripts/gen-loon.js
+          node scripts/gen-stash.js
+          node scripts/gen-mobileconfig.js
+          node scripts/gen-tunna.js
+          node scripts/gen-egern.js
 
       - name: Generate Manifests & Loader
         run: |
-          node scripts/gen-manifest.js || true
-          node scripts/gen-index-loader.js || true
-          node scripts/gen-catalog.js || true
+          node scripts/gen-manifest.js
+          node scripts/gen-index-loader.js
+          node scripts/gen-catalog.js
 
       - name: Generate QR Codes
         run: |
@@ -127,41 +143,40 @@ jobs:
             echo "gen-qrcodes.js not found, skipping"
           fi
 
-      - name: Validate pages output
-        run: |
-          if [ ! -d "apps/loader/public" ]; then
-            echo "ERROR: apps/loader/public missing; build may have failed" && exit 1
-          fi
-          echo "Pages directory present: $(du -sh apps/loader/public || true)"
+      - name: Validate Configs & Obfuscated Payloads
+        run: node scripts/validate-configs.js
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: apps/loader/public
 
+      - name: Save Build Cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BUILD_CACHE_DIR }}
+          key: ${{ runner.os }}-build-cache-${{ github.sha }}
+
   test:
-    name: 🧪 Run Tests
+    name: 🧪 Run Tests & Lint
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: read
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       - name: Install pnpm
         run: |
           corepack enable
           corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
           pnpm -v
           if [ -f pnpm-lock.yaml ]; then
-            echo "pnpm-lock.yaml found, installing with frozen lockfile"
             pnpm install --frozen-lockfile
           else
-            echo "pnpm-lock.yaml missing, installing without frozen lockfile"
             pnpm install --no-frozen-lockfile
           fi
-      - name: Run Tests & Lint
+      - name: Run Lint & Tests
         run: |
           pnpm lint || (echo "Lint errors" && exit 1)
           pnpm test || (echo "Tests failed" && exit 1)
@@ -179,11 +194,9 @@ jobs:
       name: github-pages
     steps:
       - name: Deploy to GitHub Pages
-        id: deploy
         uses: actions/deploy-pages@v4
       - name: Show published URL
-        run: |
-          echo "Pages deployed. Visit the Pages site from repository settings or Actions environment URL."
+        run: echo "Pages deployed. Visit repository settings or Actions environment URL."
 
   notify:
     name: 📢 Send Discord Notification
@@ -215,7 +228,6 @@ jobs:
             curl -s -H "Content-Type: application/json" -d @payload.json "$DISCORD_WEBHOOK" || echo "Discord notify failed"
           else
             echo "No DISCORD_WEBHOOK secret configured; skipping notifications"
-          fi
 
   cleanup:
     name: 🧹 Cleanup
