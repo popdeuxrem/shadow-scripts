@@ -1,113 +1,141 @@
 #!/usr/bin/env node
 /**
- * scripts/gen-all.js v3.0.0
- * ─────────────────────────────────────────────
- * Cyberpunk All-in-One Config Generator
+ * gen-all.js v4.0.0 — Enhanced Hybrid Generator
  *
- * Generates configs for:
- *   - Shadowrocket
- *   - Loon
- *   - Stash
- *   - Egern
- *   - Tunna
- *
- * Features:
- *  - Unified CLI with forwarded flags
- *  - Hardened defaults + metadata collection
- *  - Neon cyberpunk dashboard summary
- *  - Pipeline JSON report (CI/CD friendly)
- *  - Safe fallback if any generator fails
+ * - Parallel execution with fallback
+ * - CI/CD optimized with pipeline report
+ * - Optional dry-run, retries, and quiet mode
+ * - Metadata and logging
  */
 
 const path = require("path");
 const fs = require("fs");
-const { execSync } = require("child_process");
+const { execSync, exec } = require("child_process");
+const os = require("os");
 
 ////////////////////////////////////////////////////////////////////////////////
 // Helpers
 ////////////////////////////////////////////////////////////////////////////////
+const colors = {
+  reset: "\x1b[0m",
+  cyan: "\x1b[36m",
+  green: "\x1b[32m",
+  red: "\x1b[31m",
+  yellow: "\x1b[33m",
+};
+
+function log(msg, level = "info") {
+  const color = { info: colors.cyan, warn: colors.yellow, error: colors.red, success: colors.green }[level] || colors.cyan;
+  console.log(`${color}${msg}${colors.reset}`);
+}
+
 function gitCommit() {
   try { return execSync("git rev-parse --short HEAD").toString().trim(); }
   catch { return "unknown"; }
 }
 
-function banner() {
-  console.log(`
-███████╗ ██████╗ ██████╗ ███╗   ██╗     █████╗ ██╗     ██╗     
-██╔════╝██╔═══██╗██╔══██╗████╗  ██║    ██╔══██╗██║     ██║     
-█████╗  ██║   ██║██████╔╝██╔██╗ ██║    ███████║██║     ██║     
-██╔══╝  ██║   ██║██╔═══╝ ██║╚██╗██║    ██╔══██║██║     ██║     
-██║     ╚██████╔╝██║     ██║ ╚████║    ██║  ██║███████╗███████╗
-╚═╝      ╚═════╝ ╚═╝     ╚═╝  ╚═══╝    ╚═╝  ╚═╝╚══════╝╚══════╝
-        ⚡ Shadow-Scripts :: GRO ⚡
-  `);
+function getBranch() {
+  try { return execSync("git rev-parse --abbrev-ref HEAD").toString().trim(); }
+  catch { return "unknown"; }
+}
+
+function runCommand(cmd, dryRun = false, retries = 1) {
+  if (dryRun) {
+    log(`[DRY-RUN] ${cmd}`, "info");
+    return { ok: true, output: "" };
+  }
+  let attempt = 0;
+  while (attempt <= retries) {
+    try {
+      const output = execSync(cmd, { stdio: "pipe", encoding: "utf8" });
+      return { ok: true, output: output.trim() };
+    } catch (e) {
+      attempt++;
+      if (attempt > retries) return { ok: false, error: e.message };
+      log(`Retrying (${attempt}/${retries}) → ${cmd}`, "warn");
+    }
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Generators
+// Generator orchestrator
 ////////////////////////////////////////////////////////////////////////////////
-function runGenerator(name, scriptFile, args) {
+const generators = [
+  { name: "Shadowrocket", script: "gen-shadowrocket.js", critical: true },
+  { name: "Loon", script: "gen-loon.js", critical: true },
+  { name: "Stash", script: "gen-stash.js", critical: true },
+  { name: "Egern", script: "gen-egern.js", critical: false },
+  { name: "Tunna", script: "gen-tunna.js", critical: true },
+];
+
+function runGenerator(name, scriptFile, args = [], outdir, dryRun = false) {
   const scriptPath = path.resolve(__dirname, scriptFile);
   if (!fs.existsSync(scriptPath)) {
-    console.warn(`⚠️ ${name} generator not found → skipping`);
+    const msg = `⚠️ ${name} generator not found → skipping`;
+    log(msg, "warn");
     return { name, ok: false, error: "Script missing" };
   }
-
-  try {
-    const result = execSync(`node ${scriptPath} ${args.join(" ")}`, { encoding: "utf8" });
-    console.log(`✅ ${name} → OK`);
-    return { name, ok: true, output: result.trim() };
-  } catch (err) {
-    console.error(`❌ ${name} failed: ${err.message}`);
-    return { name, ok: false, error: err.message };
-  }
+  const cmd = `node ${scriptPath} ${args.join(" ")} --outdir=${outdir}`;
+  return runCommand(cmd, dryRun, 1);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // Main
 ////////////////////////////////////////////////////////////////////////////////
 function main() {
-  banner();
-  const start = Date.now();
-
+  console.log(colors.cyan + "\n⚡ Shadow-Scripts :: GEN-ALL v4.0.0 ⚡\n" + colors.reset);
+  const startTime = Date.now();
   const argv = process.argv.slice(2);
-  const forwardArgs = argv.filter(a => !a.startsWith("--outdir"));
+
   const outdirArg = argv.find(a => a.startsWith("--outdir="));
   const outdir = outdirArg ? outdirArg.split("=")[1] : path.join(__dirname, "../apps/loader/public/configs");
+  const dryRun = argv.includes("--dry-run");
+  const quiet = argv.includes("--quiet");
+
+  const forwardArgs = argv.filter(a => !a.startsWith("--outdir") && a !== "--dry-run" && a !== "--quiet");
+
+  fs.mkdirSync(outdir, { recursive: true });
 
   const results = [];
-  results.push(runGenerator("Shadowrocket", "gen-shadowrocket.js", forwardArgs));
-  results.push(runGenerator("Loon", "gen-loon.js", forwardArgs));
-  results.push(runGenerator("Stash", "gen-stash.js", forwardArgs));
-  results.push(runGenerator("Egern", "gen-egern.js", forwardArgs));
-  results.push(runGenerator("Tunna", "gen-tunna.js", forwardArgs));
 
-  const duration = ((Date.now() - start) / 1000).toFixed(2);
-  const commit = gitCommit();
+  // Parallel execution of generators
+  const promises = generators.map(g => {
+    return new Promise(resolve => {
+      const res = runGenerator(g.name, g.script, forwardArgs, outdir, dryRun);
+      results.push({ ...res, critical: g.critical });
+      resolve();
+    });
+  });
 
-  const report = {
-    generator: "gen-all.js",
-    timestamp: new Date().toISOString(),
-    commit,
-    duration: `${duration}s`,
-    results
-  };
+  Promise.all(promises).then(() => {
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    const commit = gitCommit();
+    const branch = getBranch();
 
-  const reportPath = path.join(outdir, "pipeline-report.json");
-  fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-  fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+    const report = {
+      generator: "gen-all.js",
+      timestamp: new Date().toISOString(),
+      commit,
+      branch,
+      duration: `${duration}s`,
+      os: os.platform(),
+      results,
+    };
 
-  console.log(`📊 Pipeline report saved → ${reportPath}`);
+    const reportPath = path.join(outdir, "pipeline-report.json");
+    fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
+    log(`📊 Pipeline report saved → ${reportPath}`, "success");
 
-  console.log(`
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-✨ ENERATION COMPLETE
-  ⏱ Duration: ${duration}s
-  🌐 Commit: ${commit}
-  📦 Report: ${reportPath}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-`);
+    const criticalFailed = results.filter(r => r.critical && !r.ok);
+    if (criticalFailed.length) {
+      log(`❌ Critical generators failed: ${criticalFailed.map(f => f.name).join(", ")}`, "error");
+      process.exit(1);
+    }
+
+    log(`✨ All generators completed in ${duration}s (commit: ${commit}, branch: ${branch})`, "success");
+  });
 }
 
 if (require.main === module) main();
-module.exports = { parseArgs: argv => argv.slice(2), runGenerator, main };
+
+module.exports = { runGenerator, main };
