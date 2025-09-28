@@ -55,7 +55,6 @@ qrcodes/
 package-lock.json
 yarn.lock
 yarn-error.log*
-pnpm-lock.yaml
 .pnpm-debug.log*
 
 # === IDE / Editor ===
@@ -111,10 +110,12 @@ junit.xml
 !/README.md
 !/LICENSE*
 !/package.json
+!/pnpm-lock.yaml
 !/pnpm-workspace.yaml
 !/src-scripts/
 !/scripts/
 !/apps/
+!/configs/
 !/tsconfig.json
 !/babel.config.*
 !/webpack.config.*

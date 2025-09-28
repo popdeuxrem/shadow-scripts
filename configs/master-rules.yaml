@@ -1,0 +1,92 @@
+# Shadow Scripts Master Rules Configuration
+# =====================================
+
+meta:
+  version: "5.0.0"
+  author: "PopdeuxRem Security Research"
+  description: "Cyberpunk security toolkit proxy and rules configuration"
+  updated: "2024-09-27T22:00:00Z"
+
+general:
+  dns:
+    - "1.1.1.1"
+    - "1.0.0.1"
+    - "9.9.9.9"
+    - "149.112.112.112"
+  bypass:
+    - "192.168.0.0/16"
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "127.0.0.0/8"
+    - "localhost"
+    - "*.local"
+
+proxies:
+  US:
+    - name: "US-DIRECT"
+      type: "direct"
+      host: "127.0.0.1"
+      port: 80
+  EU:
+    - name: "EU-DIRECT"
+      type: "direct"
+      host: "127.0.0.1" 
+      port: 80
+
+groups:
+  - name: "US"
+    type: "select"
+    proxies: ["US-DIRECT", "DIRECT"]
+  - name: "EU" 
+    type: "select"
+    proxies: ["EU-DIRECT", "DIRECT"]
+  - name: "AUTO"
+    type: "url-test"
+    proxies: ["US-DIRECT", "EU-DIRECT"]
+
+rules:
+  # Standard domain routing rules
+  - type: "DOMAIN-SUFFIX"
+    value: "apple.com"
+    group: "DIRECT"
+  - type: "DOMAIN-SUFFIX"
+    value: "icloud.com"
+    group: "DIRECT"
+  - type: "DOMAIN-SUFFIX"
+    value: "github.com"
+    group: "US"
+  - type: "GEOIP"
+    value: "CN"
+    group: "US"
+
+## 📦 Remote RULE-SET Sources
+# Auto-generated rules from build-rulesets.js will be inserted here
+
+## 🌍 Default Fallback Routing
+  - type: "MATCH"
+    value: "all"
+    group: "US"
+
+block_domains:
+  - "doubleclick.net"
+  - "googleadservices.com"
+  - "googlesyndication.com"
+  - "facebook.com"
+  - "fbcdn.net"
+
+mitm_hostnames:
+  - "*.github.com"
+  - "*.googleapis.com"
+  - "*.cloudflare.com"
+  - "*.jsdelivr.net"
+  - "*.unpkg.com"
+
+scripts:
+  fingerprint_spoof:
+    url: "https://popdeuxrem.github.io/shadow-scripts/payloads/fp-evasion.b64"
+    integrity: "sha256-placeholder"
+    interval: 300
+  cookie_rotator:
+    url: "https://popdeuxrem.github.io/shadow-scripts/payloads/rotate-cookies.b64"
+    integrity: "sha256-placeholder"
+    interval: 600
