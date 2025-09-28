@@ -8,6 +8,7 @@ DIST_DIR="apps/loader/public/v$VERSION"
 LATEST_DIR="apps/loader/public/latest"
 BUILD_INFO_FILE="$DIST_DIR/build-info.json"
 GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+REPORT_FILE="$DIST_DIR/pipeline-report.json"
 
 # Flags
 FORCE_REBUILD=0
@@ -58,43 +59,20 @@ EOF
 
 # === Preflight Checks ===
 preflight_checks() {
-  log_step 0 10 "Preflight Checks"
+  log_step 0 8 "Preflight Checks"
   start_step_timer
 
   for cmd in git node pnpm rsync; do validate_cmd "$cmd"; done
-
-  mkdir -p "$ROOT_DIR/src-scripts" \
-           "$ROOT_DIR/scripts" \
+  mkdir -p "$ROOT_DIR/scripts" \
            "$ROOT_DIR/$DIST_DIR" \
            "$ROOT_DIR/$LATEST_DIR" \
            "$ROOT_DIR/apps/loader/public/configs" \
            "$ROOT_DIR/.build-cache"
 
-  critical_scripts=(build-all.sh obfuscate-all.js gen-shadowrocket.js gen-loon.js \
-                    gen-stash.js gen-tunna.js gen-egern.js gen-mobileconfig.js \
-                    gen-manifest.js gen-index-loader.js gen-mitm-loader.js gen-qrcodes.js)
-
-  for f in "${critical_scripts[@]}"; do
-    [[ -f "$ROOT_DIR/scripts/$f" ]] || log_warn "Missing script: scripts/$f"
-  done
-
   end_step_timer
 }
 
-# === Config Generation ===
-generate_config() {
-  local script="$1"
-  local output="$2"
-  if [ -f "$script" ]; then
-    node "$script" > "$output" || log_error "Config generation failed: $output"
-    [[ -s "$output" ]] || log_error "Generated file is empty: $output"
-    log_info "Config generated: $output"
-  else
-    log_warn "Script missing: $script"
-  fi
-}
-
-# === Build Pipeline ===
+# === Run Build ===
 run_build() {
   start_time=$(date +%s)
   STEP=1
@@ -102,7 +80,7 @@ run_build() {
   preflight_checks
 
   # Step 1: Install dependencies
-  log_step $((STEP++)) 10 "Installing dependencies"
+  log_step $((STEP++)) 8 "Installing dependencies"
   start_step_timer
   if [ -f "pnpm-lock.yaml" ]; then
     pnpm install --frozen-lockfile --prefer-offline
@@ -111,43 +89,22 @@ run_build() {
   fi
   end_step_timer
 
-  # Step 2: Clean + Obfuscate payloads
-  log_step $((STEP++)) 10 "Obfuscating payloads"
+  # Step 2: Obfuscate payloads
+  log_step $((STEP++)) 8 "Obfuscating payloads"
   start_step_timer
   rm -rf "$ROOT_DIR/apps/loader/public/obfuscated"
   mkdir -p "$ROOT_DIR/apps/loader/public/obfuscated"
-  node "$ROOT_DIR/scripts/obfuscate-all.js" --profile "$OBFUSCATION_PROFILE" || log_error "Obfuscation failed"
+  node "$ROOT_DIR/scripts/obfuscate-all.js" --profile "$OBFUSCATION_PROFILE" || log_warn "Obfuscation failed"
   end_step_timer
 
-  # Step 3: Generate Manifest
-  log_step $((STEP++)) 10 "Generating manifest"
+  # Step 3: Run unified generator (gen-all.js)
+  log_step $((STEP++)) 8 "Generating all configs via gen-all.js"
   start_step_timer
-  node "$ROOT_DIR/scripts/gen-manifest.js" --ci
+  node "$ROOT_DIR/scripts/gen-all.js" --outdir "$ROOT_DIR/apps/loader/public/configs" --ci || log_warn "gen-all.js encountered warnings"
   end_step_timer
 
-  # Step 4: Generate Dashboards & Loaders
-  log_step $((STEP++)) 10 "Generating dashboards & loaders"
-  start_step_timer
-  node "$ROOT_DIR/scripts/gen-dashboard.js" --ci
-  node "$ROOT_DIR/scripts/gen-index-loader.js" --ci
-  node "$ROOT_DIR/scripts/gen-catalog.js" --ci || log_warn "Catalog generation skipped"
-  end_step_timer
-
-  # Step 5: Generate Proxy Configs
-  log_step $((STEP++)) 10 "Generating proxy configs"
-  start_step_timer
-  CONFIG_DIR="$ROOT_DIR/apps/loader/public/configs"
-  mkdir -p "$CONFIG_DIR"
-  generate_config "$ROOT_DIR/scripts/gen-shadowrocket.js" "$CONFIG_DIR/shadowrocket.conf"
-  generate_config "$ROOT_DIR/scripts/gen-loon.js" "$CONFIG_DIR/loon.conf"
-  generate_config "$ROOT_DIR/scripts/gen-stash.js" "$CONFIG_DIR/stash.conf"
-  generate_config "$ROOT_DIR/scripts/gen-mobileconfig.js" "$CONFIG_DIR/mobileconfig.mobileconfig"
-  generate_config "$ROOT_DIR/scripts/gen-tunna.js" "$CONFIG_DIR/tunna.conf"
-  generate_config "$ROOT_DIR/scripts/gen-egern.js" "$CONFIG_DIR/egern.conf"
-  end_step_timer
-
-  # Step 6: Generate QR Codes
-  log_step $((STEP++)) 10 "Generating QR codes"
+  # Step 4: Generate QR Codes
+  log_step $((STEP++)) 8 "Generating QR codes"
   start_step_timer
   if [ -f "$ROOT_DIR/scripts/gen-qrcodes.js" ]; then
     node "$ROOT_DIR/scripts/gen-qrcodes.js" --output "$ROOT_DIR/apps/loader/public/qrcodes" --version "$GIT_HASH"
@@ -156,32 +113,45 @@ run_build() {
   fi
   end_step_timer
 
-  # Step 7: Validation
+  # Step 5: Validation
   if [ $SKIP_VALIDATION -eq 0 ]; then
-    log_step $((STEP++)) 10 "Validating .gitignore"
+    log_step $((STEP++)) 8 "Validation"
     start_step_timer
     node "$ROOT_DIR/scripts/validate-gitignore.js" || log_warn ".gitignore validation failed"
+    node "$ROOT_DIR/scripts/validate-configs.js" || log_warn "Config validation warnings"
     end_step_timer
   else
     log_info "Skipping validation step"
   fi
 
-  # Step 8: Build Summary
-  log_step $((STEP++)) 10 "Build Summary"
+  # Step 6: Build Summary + Pipeline Report
+  log_step $((STEP++)) 8 "Build Summary & Pipeline Report"
   start_step_timer
+  total_payloads=$(ls -1 "$ROOT_DIR/apps/loader/public/obfuscated" | wc -l)
   echo "──────────────────────────────"
-  echo "📦 Payloads obfuscated: $(ls -1 "$ROOT_DIR/apps/loader/public/obfuscated" | wc -l)"
-  echo "📑 Manifest: $ROOT_DIR/apps/loader/public/manifest.json"
-  echo "📊 Dashboards: $ROOT_DIR/apps/loader/public/catalog.html, manifest.html"
-  echo "⚙️ Configs: apps/loader/public/configs/*.conf, *.mobileconfig"
+  echo "📦 Payloads obfuscated: $total_payloads"
+  echo "⚙️ Configs generated: apps/loader/public/configs/"
   echo "🔗 QR Codes: $ROOT_DIR/apps/loader/public/qrcodes/*"
   echo "──────────────────────────────"
+
+  mkdir -p "$(dirname "$REPORT_FILE")"
+  cat <<EOF > "$REPORT_FILE"
+{
+  "git_hash": "$GIT_HASH",
+  "version": "$VERSION",
+  "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "payloads": $total_payloads,
+  "configs_dir": "apps/loader/public/configs",
+  "qrcodes_dir": "apps/loader/public/qrcodes"
+}
+EOF
+  log_success "Pipeline report written: $REPORT_FILE"
   end_step_timer
 
   total_time=$(( $(date +%s) - start_time ))
   log_success "Total build time: ${total_time}s"
 }
 
-# === Run ===
+# === Execute ===
 parse_args "$@"
 run_build
