@@ -58,102 +58,44 @@ jobs:
         run: |
           corepack enable
           corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
-          pnpm -v
-          if [ -f pnpm-lock.yaml ]; then
-            pnpm install --frozen-lockfile --prefer-offline
-          else
-            pnpm install --no-frozen-lockfile --prefer-offline
-          fi
+          pnpm install --frozen-lockfile --prefer-offline || pnpm install --no-frozen-lockfile --prefer-offline
 
-  build:
-    name: 🚀 Build Application & Artifacts
+  generate:
+    name: ⚡ Generate All Configs
     needs: setup
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       pages: write
-    outputs:
-      pages-artifact: apps/loader/public
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Restore pnpm cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.pnpm-store
-            .pnpm-store
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-
-      - name: Install dependencies (build)
+      - name: Run gen-all.js
         run: |
           corepack enable
           corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
-          pnpm -v
-          if [ -f pnpm-lock.yaml ]; then
-            pnpm install --frozen-lockfile --prefer-offline
-          else
-            pnpm install --no-frozen-lockfile --prefer-offline
-          fi
+          node scripts/gen-all.js --outdir=apps/loader/public/configs
 
-      - name: Prebuild - Install all Node dependencies globally
-        run: |
-          set -euo pipefail
-          echo "Installing all Node dependencies globally to prevent module-not-found errors..."
-          if [ -f package.json ]; then
-            pkgs=$(jq -r '.dependencies // {} + .devDependencies // {} | keys[]' package.json)
-            if [ -n "$pkgs" ]; then
-              echo "Installing packages globally: $pkgs"
-              npm install -g $pkgs
-            else
-              echo "No dependencies found in package.json"
-            fi
-          else
-            echo "package.json missing; skipping global prebuild install"
-          fi
-
-      - name: Make scripts executable
-        run: chmod +x ./scripts/*.sh || true
-
-      - name: Run Full Build Pipeline
-        run: |
-          set -euo pipefail
-          export TERM=xterm-256color
-          ./scripts/build-all.sh
-
-      - name: Generate Manifests & Loader
-        run: |
-          node scripts/gen-manifest.js || true
-          node scripts/gen-index-loader.js || true
-          node scripts/gen-catalog.js || true
-
-      - name: Generate QR Codes
-        run: |
-          if [ -f ./scripts/gen-qrcodes.js ]; then
-            node scripts/gen-qrcodes.js --output apps/loader/public/qrcodes --version "${{ github.ref_name || github.sha }}"
-          else
-            echo "gen-qrcodes.js not found, skipping"
-          fi
-
-      - name: Validate pages output
-        run: |
-          if [ ! -d "apps/loader/public" ]; then
-            echo "ERROR: apps/loader/public missing; build may have failed" && exit 1
-          fi
-          echo "Pages directory present: $(du -sh apps/loader/public || true)"
-
-      - name: Upload Pages Artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Upload Pipeline Report
+        uses: actions/upload-artifact@v3
         with:
-          path: apps/loader/public
+          name: pipeline-report
+          path: apps/loader/public/configs/pipeline-report.json
+
+      - name: Validate Public Configs
+        run: |
+          if [ ! -d "apps/loader/public/configs" ]; then
+            echo "ERROR: configs missing; generation may have failed" && exit 1
+          fi
+          echo "Configs directory present: $(du -sh apps/loader/public/configs)"
 
   test:
     name: 🧪 Run Tests
-    needs: build
+    needs: generate
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -161,16 +103,13 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-      - name: Install pnpm
+
+      - name: Install Dependencies
         run: |
           corepack enable
           corepack prepare pnpm@${{ env.PNPM_VERSION }} --activate
-          pnpm -v
-          if [ -f pnpm-lock.yaml ]; then
-            pnpm install --frozen-lockfile
-          else
-            pnpm install --no-frozen-lockfile
-          fi
+          pnpm install --frozen-lockfile || pnpm install --no-frozen-lockfile
+
       - name: Run Tests & Lint
         run: |
           pnpm lint || (echo "Lint errors" && exit 1)
@@ -178,7 +117,7 @@ jobs:
 
   deploy:
     name: 🌐 Deploy to GitHub Pages
-    needs: [build, test]
+    needs: [generate, test]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -189,11 +128,10 @@ jobs:
       name: github-pages
     steps:
       - name: Deploy to GitHub Pages
-        id: deploy
         uses: actions/deploy-pages@v4
+
       - name: Show published URL
-        run: |
-          echo "Pages deployed. Visit the Pages site from repository settings or Actions environment URL."
+        run: echo "Pages deployed. Visit the repository settings or Actions environment URL."
 
   notify:
     name: 📢 Send Discord Notification
@@ -225,7 +163,6 @@ jobs:
             curl -s -H "Content-Type: application/json" -d @payload.json "$DISCORD_WEBHOOK" || echo "Discord notify failed"
           else
             echo "No DISCORD_WEBHOOK secret configured; skipping notifications"
-          fi
 
   cleanup:
     name: 🧹 Cleanup
