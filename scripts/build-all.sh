@@ -17,19 +17,16 @@ DEPLOY_ENV="production"
 OBFUSCATION_PROFILE="medium"
 
 # === Logging Helpers ===
-log_info()    { echo -e "\033[34m[INFO]\033[0m $1"; }
+log_info()    { echo -e "\033[36m[INFO]\033[0m $1"; }
 log_success() { echo -e "\033[32m[SUCCESS]\033[0m $1"; }
 log_warn()    { echo -e "\033[33m[WARN]\033[0m $1"; }
 log_error()   { echo -e "\033[31m[ERROR]\033[0m $1" >&2; exit 1; }
-log_step()    { echo -e "\n\033[36m=== [$1/$2] $3 ===\033[0m"; }
+log_step()    { echo -e "\n\033[35m=== [$1/$2] $3 ===\033[0m"; }
 start_step_timer() { step_start_time=$(date +%s); }
 end_step_timer()   { local end=$(date +%s); log_success "Step completed in $((end - step_start_time))s"; }
 
 # === Utilities ===
-validate_cmd() {
-  local cmd="$1"
-  command -v "$cmd" &>/dev/null || log_error "Missing required command: '$cmd'"
-}
+validate_cmd() { command -v "$1" &>/dev/null || log_error "Missing required command: '$1'"; }
 
 # === Argument Parsing ===
 parse_args() {
@@ -64,10 +61,8 @@ preflight_checks() {
   log_step 0 10 "Preflight Checks"
   start_step_timer
 
-  # Required commands
   for cmd in git node pnpm rsync; do validate_cmd "$cmd"; done
 
-  # Prepare directories
   mkdir -p "$ROOT_DIR/src-scripts" \
            "$ROOT_DIR/scripts" \
            "$ROOT_DIR/$DIST_DIR" \
@@ -75,23 +70,34 @@ preflight_checks() {
            "$ROOT_DIR/apps/loader/public/configs" \
            "$ROOT_DIR/.build-cache"
 
-  # Verify critical scripts
-  local critical=(build-all.sh obfuscate-all.js gen-shadowrocket.js gen-loon.js \
-                  gen-stash.js gen-tunna.js gen-mobileconfig.js gen-manifest.js \
-                  gen-index-loader.js gen-mitm-loader.js gen-qrcodes.js)
-  for f in "${critical[@]}"; do
-    if [[ ! -f "$ROOT_DIR/scripts/$f" ]]; then
-      log_warn "⚠️ Missing script: scripts/$f"
-    fi
+  critical_scripts=(build-all.sh obfuscate-all.js gen-shadowrocket.js gen-loon.js \
+                    gen-stash.js gen-tunna.js gen-egern.js gen-mobileconfig.js \
+                    gen-manifest.js gen-index-loader.js gen-mitm-loader.js gen-qrcodes.js)
+
+  for f in "${critical_scripts[@]}"; do
+    [[ -f "$ROOT_DIR/scripts/$f" ]] || log_warn "Missing script: scripts/$f"
   done
 
   end_step_timer
 }
 
-# === Build Steps ===
+# === Config Generation ===
+generate_config() {
+  local script="$1"
+  local output="$2"
+  if [ -f "$script" ]; then
+    node "$script" > "$output" || log_error "Config generation failed: $output"
+    [[ -s "$output" ]] || log_error "Generated file is empty: $output"
+    log_info "Config generated: $output"
+  else
+    log_warn "Script missing: $script"
+  fi
+}
+
+# === Build Pipeline ===
 run_build() {
   start_time=$(date +%s)
-  local STEP=1
+  STEP=1
 
   preflight_checks
 
@@ -119,7 +125,7 @@ run_build() {
   node "$ROOT_DIR/scripts/gen-manifest.js" --ci
   end_step_timer
 
-  # Step 4: Generate Dashboards
+  # Step 4: Generate Dashboards & Loaders
   log_step $((STEP++)) 10 "Generating dashboards & loaders"
   start_step_timer
   node "$ROOT_DIR/scripts/gen-dashboard.js" --ci
@@ -127,15 +133,17 @@ run_build() {
   node "$ROOT_DIR/scripts/gen-catalog.js" --ci || log_warn "Catalog generation skipped"
   end_step_timer
 
-  # Step 5: Generate Configs
+  # Step 5: Generate Proxy Configs
   log_step $((STEP++)) 10 "Generating proxy configs"
   start_step_timer
-  node "$ROOT_DIR/scripts/gen-shadowrocket.js"
-  node "$ROOT_DIR/scripts/gen-loon.js"
-  node "$ROOT_DIR/scripts/gen-stash.js"
-  node "$ROOT_DIR/scripts/gen-mobileconfig.js"
-  node "$ROOT_DIR/scripts/gen-tunna.js"
-  node "$ROOT_DIR/scripts/gen-egern.js"
+  CONFIG_DIR="$ROOT_DIR/apps/loader/public/configs"
+  mkdir -p "$CONFIG_DIR"
+  generate_config "$ROOT_DIR/scripts/gen-shadowrocket.js" "$CONFIG_DIR/shadowrocket.conf"
+  generate_config "$ROOT_DIR/scripts/gen-loon.js" "$CONFIG_DIR/loon.conf"
+  generate_config "$ROOT_DIR/scripts/gen-stash.js" "$CONFIG_DIR/stash.conf"
+  generate_config "$ROOT_DIR/scripts/gen-mobileconfig.js" "$CONFIG_DIR/mobileconfig.mobileconfig"
+  generate_config "$ROOT_DIR/scripts/gen-tunna.js" "$CONFIG_DIR/tunna.conf"
+  generate_config "$ROOT_DIR/scripts/gen-egern.js" "$CONFIG_DIR/egern.conf"
   end_step_timer
 
   # Step 6: Generate QR Codes
@@ -165,7 +173,7 @@ run_build() {
   echo "📦 Payloads obfuscated: $(ls -1 "$ROOT_DIR/apps/loader/public/obfuscated" | wc -l)"
   echo "📑 Manifest: $ROOT_DIR/apps/loader/public/manifest.json"
   echo "📊 Dashboards: $ROOT_DIR/apps/loader/public/catalog.html, manifest.html"
-  echo "⚙️ Configs: apps/loader/public/*.conf, *.mobileconfig"
+  echo "⚙️ Configs: apps/loader/public/configs/*.conf, *.mobileconfig"
   echo "🔗 QR Codes: $ROOT_DIR/apps/loader/public/qrcodes/*"
   echo "──────────────────────────────"
   end_step_timer
