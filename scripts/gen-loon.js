@@ -44,7 +44,7 @@ if (cliOutDir && process.env.LOON_OUTDIR) {
 }
 const resolvedOutDir = cliOutDir || resolvedEnvOutDir;
 const OUT_DIR = resolvedOutDir
-  ? (path.isAbsolute(resolvedOutDir) ? resolvedOutDir : path.join(resolvedOutDir))
+  ? (path.isAbsolute(resolvedOutDir) ? resolvedOutDir : path.resolve(process.cwd(), resolvedOutDir))
   : path.join("apps/loader/public/configs");
 const OUT_FILE = path.join(OUT_DIR, "loon.conf");
 

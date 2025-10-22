@@ -23,9 +23,11 @@ import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
 import { spawnSync } from "child_process";
+import { fileURLToPath } from "url";
 import yaml from "js-yaml";
 
-const ROOT = path.resolve(new URL(import.meta.url).pathname, "..", "..");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(__dirname, "..");
 const MASTER_RULES = path.join(ROOT, "configs", "master-rules.yaml");
 const DEFAULT_MANIFEST_PATH = path.join(ROOT, "apps", "loader", "public", "manifest.json");
 
