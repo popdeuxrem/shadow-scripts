@@ -21,7 +21,31 @@ import { v4 as uuidv4 } from "uuid";
 
 const VERSION = "3.0.0";
 const INPUT = process.env.MASTER_RULES || path.join("configs", "master-rules.yaml");
-const OUT_DIR = process.env.LOOON_OUTDIR || path.join("apps/loader/public/configs");
+const argv = process.argv.slice(2);
+
+function getFlagValue(flag) {
+  const inline = argv.find(arg => arg.startsWith(`${flag}=`));
+  if (inline) return inline.split("=")[1];
+  const index = argv.indexOf(flag);
+  if (index !== -1 && argv[index + 1] && !argv[index + 1].startsWith("--")) {
+    return argv[index + 1];
+  }
+  return null;
+}
+
+const cliOutDir = getFlagValue("--outdir");
+const legacyEnvOutDir = process.env.LOOON_OUTDIR;
+const resolvedEnvOutDir = process.env.LOON_OUTDIR || legacyEnvOutDir;
+if (legacyEnvOutDir && !process.env.LOON_OUTDIR) {
+  console.warn("[WARN] Detected LOOON_OUTDIR (deprecated). Use LOON_OUTDIR instead.");
+}
+if (cliOutDir && process.env.LOON_OUTDIR) {
+  console.warn("[WARN] Both CLI --outdir and LOON_OUTDIR provided; CLI flag takes precedence.");
+}
+const resolvedOutDir = cliOutDir || resolvedEnvOutDir;
+const OUT_DIR = resolvedOutDir
+  ? (path.isAbsolute(resolvedOutDir) ? resolvedOutDir : path.resolve(process.cwd(), resolvedOutDir))
+  : path.join("apps/loader/public/configs");
 const OUT_FILE = path.join(OUT_DIR, "loon.conf");
 
 const MINIFY = process.argv.includes("--minify");
