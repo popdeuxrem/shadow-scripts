@@ -15,7 +15,7 @@
 
 import fs from "fs";
 import path from "path";
-import { execSync } from "child_process";
+import { execSync, spawnSync } from "child_process";
 
 ////////////////////////////////////////////////////////////////////////////////
 // Helpers
@@ -47,9 +47,27 @@ function runCommand(cmd, args = []) {
 // Paths & Environment
 ////////////////////////////////////////////////////////////////////////////////
 const ROOT_DIR = path.resolve(".");
+
+function getFlagValue(flag) {
+  const inline = process.argv.find(arg => arg.startsWith(`${flag}=`));
+  if (inline) return inline.split("=")[1];
+  const idx = process.argv.indexOf(flag);
+  if (idx !== -1 && process.argv[idx + 1] && !process.argv[idx + 1].startsWith("--")) {
+    return process.argv[idx + 1];
+  }
+  return null;
+}
+
 const OUT_DIR = (() => {
-  const arg = process.argv.find(a => a.startsWith("--outdir="));
-  return arg ? arg.split("=")[1] : path.join(ROOT_DIR, "apps/loader/public/configs");
+  const candidate = getFlagValue("--outdir") || process.env.CONFIG_OUTDIR;
+  const fallback = path.join(ROOT_DIR, "apps/loader/public/configs");
+  const resolved = candidate ?? fallback;
+  return path.isAbsolute(resolved) ? resolved : path.resolve(ROOT_DIR, resolved);
+})();
+
+const OBFUSCATION_PROFILE = (() => {
+  const candidate = getFlagValue("--profile") || process.env.OBFUSCATION_PROFILE;
+  return candidate || "medium";
 })();
 const QR_DIR = path.join(ROOT_DIR, "apps/loader/public/qrcodes");
 const BUILD_CACHE = path.join(ROOT_DIR, ".build-cache");
@@ -65,16 +83,18 @@ function runNode(script, args = []) {
   const scriptPath = path.resolve(ROOT_DIR, "scripts", script);
   if (!fileExists(scriptPath)) {
     logWarn(`Script missing: ${script}`);
-    return null;
+    return { ok: false, stdout: "", stderr: "" };
   }
-  try {
-    const result = execSync(`node ${scriptPath} ${args.join(" ")}`, { encoding: "utf-8" });
+  const result = spawnSync("node", [scriptPath, ...args], { encoding: "utf-8" });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.status === 0) {
     logSuccess(`✅ ${script} → OK`);
-    return result.trim();
-  } catch (err) {
-    logWarn(`❌ ${script} failed: ${err.message}`);
-    return null;
+    return { ok: true, stdout: result.stdout?.trim() ?? "", stderr: result.stderr?.trim() ?? "" };
   }
+  const code = typeof result.status === "number" ? ` (exit ${result.status})` : "";
+  logWarn(`❌ ${script} failed${code}: ${result.error?.message || "see output above"}`);
+  return { ok: false, stdout: result.stdout?.trim() ?? "", stderr: result.stderr?.trim() ?? "" };
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -88,7 +108,8 @@ async function main() {
   // Step 1: Obfuscate payloads
   stepBanner(step++, totalSteps, "Obfuscating payloads");
   ensureDir(path.join(ROOT_DIR, "apps/loader/public/obfuscated"));
-  runNode("obfuscate-all.js", ["--profile=medium"]);
+  logInfo(`Using obfuscation profile: ${OBFUSCATION_PROFILE}`);
+  runNode("obfuscate-all.js", [`--profile=${OBFUSCATION_PROFILE}`]);
 
   // Step 2: Generate all configs
   stepBanner(step++, totalSteps, "Generating all configs");
@@ -101,10 +122,24 @@ async function main() {
     "gen-tunna.js",
     "gen-egern.js",
   ];
+  const generatorOutputs = {
+    "gen-shadowrocket.js": ["shadowrocket.conf"],
+    "gen-loon.js": ["loon.conf"],
+    "gen-stash.js": ["stash.yaml"],
+    "gen-mobileconfig.js": ["shadowrocket.mobileconfig", "loon.mobileconfig", "stash.mobileconfig", "egern.mobileconfig"],
+    "gen-tunna.js": ["tunna.yaml"],
+    "gen-egern.js": ["egern.yaml"],
+  };
   const results = generators.map(gen => {
-    const outFile = path.join(OUT_DIR, path.basename(gen).replace("gen-", "").replace(".js", ".conf"));
-    runNode(gen, ["--outdir=" + OUT_DIR]);
-    return { generator: gen, output: outFile };
+    const execution = runNode(gen, [`--outdir=${OUT_DIR}`]);
+    const outputs = (generatorOutputs[gen] || [
+      path.basename(gen).replace("gen-", "").replace(".js", ".conf"),
+    ]).map(name => path.join(OUT_DIR, name));
+    return {
+      generator: gen,
+      success: execution.ok,
+      outputs: outputs.map(file => path.relative(ROOT_DIR, file)),
+    };
   });
 
   // Step 3: Generate manifest & loaders
@@ -141,7 +176,8 @@ async function main() {
   stepBanner(step++, totalSteps, "Build summary");
   console.log("──────────────────────────────");
   console.log(`📦 Obfuscated payloads: ${fs.readdirSync(path.join(ROOT_DIR, "apps/loader/public/obfuscated")).length}`);
-  console.log(`⚙️ Configs generated: ${OUT_DIR}`);
+  console.log(`🛡️ Obfuscation profile: ${OBFUSCATION_PROFILE}`);
+  console.log(`⚙️ Configs generated: ${path.relative(ROOT_DIR, OUT_DIR) || "."}`);
   console.log(`🔗 QR codes: ${QR_DIR}/*`);
   console.log("──────────────────────────────");
 
