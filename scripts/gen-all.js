@@ -123,7 +123,12 @@ async function main() {
     "gen-egern.js",
   ];
   const generatorOutputs = {
+    "gen-shadowrocket.js": ["shadowrocket.conf"],
+    "gen-loon.js": ["loon.conf"],
+    "gen-stash.js": ["stash.yaml"],
     "gen-mobileconfig.js": ["shadowrocket.mobileconfig", "loon.mobileconfig", "stash.mobileconfig", "egern.mobileconfig"],
+    "gen-tunna.js": ["tunna.yaml"],
+    "gen-egern.js": ["egern.yaml"],
   };
   const results = generators.map(gen => {
     const execution = runNode(gen, [`--outdir=${OUT_DIR}`]);

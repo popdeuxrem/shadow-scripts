@@ -21,10 +21,36 @@ import { execSync } from "child_process";
 
 const VERSION = "2.0.0";
 const INPUT = process.env.MASTER_RULES || path.join("configs", "master-rules.yaml");
-const OUTPUT = process.env.TUNNA_OUT || path.join("apps/loader/public/configs/tunna.yaml");
 
-const CI_MODE = process.argv.includes("--ci");
-const DRY_RUN = process.argv.includes("--dry-run");
+const argv = process.argv.slice(2);
+
+function getFlagValue(flag) {
+  const inline = argv.find(arg => arg.startsWith(`${flag}=`));
+  if (inline) return inline.split("=")[1];
+  const index = argv.indexOf(flag);
+  if (index !== -1 && argv[index + 1] && !argv[index + 1].startsWith("--")) {
+    return argv[index + 1];
+  }
+  return null;
+}
+
+const CLI_OUTDIR = getFlagValue("--outdir");
+const ENV_OUTDIR = process.env.TUNNA_OUTDIR;
+const ENV_OUTPUT = process.env.TUNNA_OUT;
+if (CLI_OUTDIR && (ENV_OUTDIR || ENV_OUTPUT)) {
+  console.warn("[WARN] CLI --outdir overrides TUNNA_OUT/TUNNA_OUTDIR environment variables.");
+}
+const DEFAULT_FILENAME = "tunna.yaml";
+const rawOutput = (() => {
+  if (CLI_OUTDIR) return path.join(CLI_OUTDIR, DEFAULT_FILENAME);
+  if (ENV_OUTDIR) return path.join(ENV_OUTDIR, DEFAULT_FILENAME);
+  if (ENV_OUTPUT) return ENV_OUTPUT;
+  return path.join("apps/loader/public/configs", DEFAULT_FILENAME);
+})();
+const OUTPUT = path.isAbsolute(rawOutput) ? rawOutput : path.resolve(process.cwd(), rawOutput);
+
+const CI_MODE = argv.includes("--ci");
+const DRY_RUN = argv.includes("--dry-run");
 
 const DEFAULT_DNS = [
   "1.1.1.1", "1.0.0.1",
