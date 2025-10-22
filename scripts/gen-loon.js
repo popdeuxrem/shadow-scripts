@@ -21,7 +21,12 @@ import { v4 as uuidv4 } from "uuid";
 
 const VERSION = "3.0.0";
 const INPUT = process.env.MASTER_RULES || path.join("configs", "master-rules.yaml");
-const OUT_DIR = process.env.LOOON_OUTDIR || path.join("apps/loader/public/configs");
+const legacyEnvOutDir = process.env.LOOON_OUTDIR;
+const resolvedEnvOutDir = process.env.LOON_OUTDIR || legacyEnvOutDir;
+if (legacyEnvOutDir && !process.env.LOON_OUTDIR) {
+  console.warn("[WARN] Detected LOOON_OUTDIR (deprecated). Use LOON_OUTDIR instead.");
+}
+const OUT_DIR = resolvedEnvOutDir || path.join("apps/loader/public/configs");
 const OUT_FILE = path.join(OUT_DIR, "loon.conf");
 
 const MINIFY = process.argv.includes("--minify");
