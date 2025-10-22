@@ -27,10 +27,25 @@ import yaml from "js-yaml";
 
 const ROOT = path.resolve(new URL(import.meta.url).pathname, "..", "..");
 const MASTER_RULES = path.join(ROOT, "configs", "master-rules.yaml");
-const MANIFEST_PATH = path.join(ROOT, "apps", "loader", "public", "manifest.json");
+const DEFAULT_MANIFEST_PATH = path.join(ROOT, "apps", "loader", "public", "manifest.json");
 
 const argv = process.argv.slice(2);
-const opts = { ci: argv.includes("--ci") };
+
+function getFlagValue(flag) {
+  const inline = argv.find(arg => arg.startsWith(`${flag}=`));
+  if (inline) return inline.split("=")[1];
+  const index = argv.indexOf(flag);
+  if (index !== -1 && argv[index + 1] && !argv[index + 1].startsWith("--")) {
+    return argv[index + 1];
+  }
+  return null;
+}
+
+const opts = {
+  ci: argv.includes("--ci"),
+  outdir: getFlagValue("--outdir"),
+  manifest: getFlagValue("--manifest"),
+};
 
 async function exists(p) {
   try { await fs.access(p); return true; } catch { return false; }
@@ -56,9 +71,10 @@ async function loadMasterRules() {
   return yaml.load(raw);
 }
 
-async function loadManifest() {
-  if (!(await exists(MANIFEST_PATH))) return null;
-  const raw = await fs.readFile(MANIFEST_PATH, "utf8");
+async function loadManifest(manifestPath) {
+  if (!manifestPath) return null;
+  if (!(await exists(manifestPath))) return null;
+  const raw = await fs.readFile(manifestPath, "utf8");
   return JSON.parse(raw);
 }
 
@@ -133,10 +149,11 @@ function mobileConfigXML({ title, description, proxies, meta }) {
 
 async function main() {
   const master = await loadMasterRules();
-  const manifest = await loadManifest();
+  const manifestPath = opts.manifest ? path.resolve(ROOT, opts.manifest) : DEFAULT_MANIFEST_PATH;
+  const manifest = await loadManifest(manifestPath);
   const meta = { git: gitMeta() };
 
-  const outdir = path.join(ROOT, "configs", "generated");
+  const outdir = opts.outdir ? path.resolve(ROOT, opts.outdir) : path.join(ROOT, "configs", "generated");
   await fs.mkdir(outdir, { recursive: true });
 
   const platforms = ["Shadowrocket", "Loon", "Stash", "Egern"];

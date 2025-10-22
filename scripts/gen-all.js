@@ -49,7 +49,22 @@ function runCommand(cmd, args = []) {
 const ROOT_DIR = path.resolve(".");
 const OUT_DIR = (() => {
   const arg = process.argv.find(a => a.startsWith("--outdir="));
-  return arg ? arg.split("=")[1] : path.join(ROOT_DIR, "apps/loader/public/configs");
+  if (arg) return arg.split("=")[1];
+  const flagIndex = process.argv.indexOf("--outdir");
+  if (flagIndex !== -1 && process.argv[flagIndex + 1]) {
+    return process.argv[flagIndex + 1];
+  }
+  return path.join(ROOT_DIR, "apps/loader/public/configs");
+})();
+const OBFUSCATION_PROFILE = (() => {
+  const inline = process.argv.find(a => a.startsWith("--profile="));
+  if (inline) return inline.split("=")[1];
+  const flagIndex = process.argv.indexOf("--profile");
+  if (flagIndex !== -1 && process.argv[flagIndex + 1]) {
+    return process.argv[flagIndex + 1];
+  }
+  if (process.env.OBFUSCATION_PROFILE) return process.env.OBFUSCATION_PROFILE;
+  return "medium";
 })();
 const QR_DIR = path.join(ROOT_DIR, "apps/loader/public/qrcodes");
 const BUILD_CACHE = path.join(ROOT_DIR, ".build-cache");
@@ -88,7 +103,8 @@ async function main() {
   // Step 1: Obfuscate payloads
   stepBanner(step++, totalSteps, "Obfuscating payloads");
   ensureDir(path.join(ROOT_DIR, "apps/loader/public/obfuscated"));
-  runNode("obfuscate-all.js", ["--profile=medium"]);
+  logInfo(`Using obfuscation profile: ${OBFUSCATION_PROFILE}`);
+  runNode("obfuscate-all.js", [`--profile=${OBFUSCATION_PROFILE}`]);
 
   // Step 2: Generate all configs
   stepBanner(step++, totalSteps, "Generating all configs");
@@ -141,6 +157,7 @@ async function main() {
   stepBanner(step++, totalSteps, "Build summary");
   console.log("──────────────────────────────");
   console.log(`📦 Obfuscated payloads: ${fs.readdirSync(path.join(ROOT_DIR, "apps/loader/public/obfuscated")).length}`);
+  console.log(`🛡️ Obfuscation profile: ${OBFUSCATION_PROFILE}`);
   console.log(`⚙️ Configs generated: ${OUT_DIR}`);
   console.log(`🔗 QR codes: ${QR_DIR}/*`);
   console.log("──────────────────────────────");
